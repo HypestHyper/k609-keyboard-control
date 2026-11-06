@@ -94,3 +94,15 @@ def test_storage_roundtrip(tmp_path):
     assert macros.load(path)[0].to_dict() == m.to_dict()
     (tmp_path / "bad.json").write_text(json.dumps({"version": 1, "macros": [{"name": "x", "steps": [{"key": 4, "down": True, "pause": 150}]}]}))
     assert macros.load(str(tmp_path / "bad.json")) == []
+
+
+
+def test_unbalanced_steps_are_refused():
+    # The user's macro: press A, release A, press J, release A (J never released).
+    m = Macro("aaajjj", [Step(A, True, 30), Step(A, False, 1000), Step(0x0d, True, 2000), Step(A, False, 30)])
+    with pytest.raises(ValueError, match="A is released without being pressed first"):
+        macros.validate(m)
+    with pytest.raises(ValueError, match="J is pressed but never released"):
+        macros.validate(Macro("x", [Step(A, True, 30), Step(A, False, 30), Step(0x0d, True, 30)]))
+    with pytest.raises(ValueError, match="released without being pressed"):
+        macros.validate(Macro("x", [Step(A, False, 0)]))

@@ -81,6 +81,17 @@ def validate(m: Macro) -> None:
         if s.key not in keymap.TARGETS:
             raise ValueError("Unsupported key in a step.")
         check_pause(s.pause)
+    held: dict[int, int] = {}
+    for s in m.steps:
+        if s.down:
+            held[s.key] = held.get(s.key, 0) + 1
+        elif held.get(s.key):
+            held[s.key] -= 1
+        else:
+            raise ValueError(f"{keymap.TARGETS[s.key]} is released without being pressed first.")
+    stuck = [keymap.TARGETS[k] for k, n in held.items() if n]
+    if stuck:
+        raise ValueError(f"{', '.join(stuck)} is pressed but never released. Add a Release step for it.")
     if len(encode_events(m.steps)) > SLOT_LEN - 2:
         raise ValueError("The macro is too long for one slot. Remove some steps or long pauses.")
 

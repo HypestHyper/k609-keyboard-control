@@ -1029,7 +1029,7 @@ class Window(Gtk.ApplicationWindow):
             key = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
             key.set_selected(codes.index(st.key) if st.key in codes else 0)
             set_accessible_label(key, f"Step {i + 1} key")
-            key.connect("notify::selected", lambda d, _p, st=st: setattr(st, "key", codes[d.get_selected()]))
+            key.connect("notify::selected", lambda d, _p, i=i: self._set_step_key(m, i, codes[d.get_selected()]))
             row.append(key)
             row.append(label("then wait", "dim", wrap=False))
             spin = Gtk.SpinButton.new_with_range(0, macros.LONG_MAX, 10)
@@ -1097,6 +1097,20 @@ class Window(Gtk.ApplicationWindow):
         btns.append(cancel)
         card.append(btns)
         return card
+
+    def _set_step_key(self, m, i, code):
+        """Change a step's key; for a press, also change the release of the same key that follows it."""
+        st = m.steps[i]
+        old = st.key
+        st.key = code
+        if st.down and old != code:
+            for later in m.steps[i + 1:]:
+                if later.key == old and later.down:
+                    break
+                if later.key == old and not later.down:
+                    later.key = code
+                    GLib.idle_add(lambda: (self.render(), False)[1])
+                    break
 
     def _save_macro(self, iface):
         index, m = self.editing
