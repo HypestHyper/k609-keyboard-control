@@ -30,7 +30,9 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("remapping", "Key remapping", Status.HARDWARE,
                "Every key except Fn, to normal keys or modifiers. Key positions decoded from the key "
                "map and recorded remaps. Media keys aren't supported yet."),
-    Capability("macros", "Macros", Status.UNKNOWN, "No protocol evidence yet."),
+    Capability("macros", "Macros", Status.HARDWARE,
+               "Key presses and pauses on normal keys, decoded from four macros saved by Redragon's "
+               "software. G1–G4 and mouse buttons aren't supported."),
     Capability("media_keys", "Media keys", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("onboard_profiles", "On-board profiles", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("polling_rate", "Polling rate", Status.UNKNOWN, "No protocol evidence yet."),

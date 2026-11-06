@@ -22,6 +22,8 @@ POINTER = 0x02
 NORMAL = 0x00
 POINTER_BASE = 132
 MODIFIER = 0x06
+MACRO = 0x10              # entry 10 00 <mode> <0x18 + slot>: the key plays a macro (see macros.py)
+MACRO_CODE = 0x100        # current() reports a macro key as MACRO_CODE + slot
 
 
 def entry_type(code: int) -> int:
@@ -155,6 +157,9 @@ def check(data: bytes) -> None:
             raise UnexpectedKeymap(f"{k.name} isn't where it's expected in the key map.")
         if k.special and e[entry] == k.special:
             continue
+        if e[entry][0] == MACRO and e[entry][1] == 0 and e[entry][2] in (0x01, 0x04) \
+                and 0x18 <= e[entry][3] < 0x20:
+            continue
         if e[entry][0] != entry_type(e[entry][3]) or e[entry][1:3] != b"\0\0":
             raise UnexpectedKeymap(f"{k.name}'s entry has an unexpected type.")
 
@@ -163,8 +168,14 @@ def current(data: bytes) -> dict[str, int]:
     """Key name -> USB code it currently sends, for remappable keys."""
     check(data)
     e = entries(data)
-    return {k.name: k.default if k.special and e[k.entry] == k.special else e[k.entry][3]
-            for k in REMAPPABLE}
+    def code(k):
+        x = e[k.entry]
+        if k.special and x == k.special:
+            return k.default
+        if x[0] == MACRO:
+            return MACRO_CODE + x[3] - 0x18
+        return x[3]
+    return {k.name: code(k) for k in REMAPPABLE}
 
 
 def build_write(data: bytes, changes: dict[str, int]) -> bytes:

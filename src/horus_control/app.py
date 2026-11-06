@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import __version__, capabilities, keymap, lighting, settings as settings_mod  # noqa: E402
+from . import __version__, capabilities, keymap, lighting, macros, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
@@ -210,6 +210,7 @@ class Window(Gtk.ApplicationWindow):
                 ("keyboard", "Keyboard", "input-keyboard-symbolic"),
                 ("lighting", "Lighting", "display-brightness-symbolic"),
                 ("keys", "Keys", "input-keyboard-symbolic"),
+                ("macros", "Macros", "media-record-symbolic"),
                 ("settings", "Settings", "preferences-system-symbolic"))):
             btn = Gtk.ToggleButton(tooltip_text=f"{title} (Alt+{i + 1})")
             inner = hbox(8)
@@ -233,6 +234,9 @@ class Window(Gtk.ApplicationWindow):
         self.keys_message = ("", "dim")
         self.keys_selected = keymap.REMAPPABLE[0].name
         self.keyboard_view = KeyboardView()     # kept for the window's life; its keys are replaced
+        self.macros_page = self._page("macros")
+        self.macro_list = macros.load()
+        self.editing = None                     # (index or None for new, working copy) while editing
         self.light_state = None                 # (devnode, lighting.State) once loaded
         self.handle = Handle()                  # kept open between operations, like the official software
         self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
@@ -333,6 +337,7 @@ class Window(Gtk.ApplicationWindow):
         iface = kb.config_interface if kb else None
         self.render_lighting(iface)
         self.render_keys(iface)
+        self.render_macros(iface)
         clear(self.status_holder)
         if not self.keyboards:
             self.status_holder.append(chip("Not found", "neutral", "dialog-information-symbolic"))
@@ -578,7 +583,7 @@ class Window(Gtk.ApplicationWindow):
             text.append(label(cap.evidence, "small", "dim"))
             row.append(text)
             usable = cap.status in (capabilities.Status.HARDWARE, capabilities.Status.HOST)
-            where = "On the Keys tab" if cap.key == "remapping" else "On the Lighting tab"
+            where = {"remapping": "On the Keys tab", "macros": "On the Macros tab"}.get(cap.key, "On the Lighting tab")
             c = chip(where, "ok") if usable else chip("Not yet verified", "neutral")
             c.set_valign(Gtk.Align.CENTER)
             row.append(c)
@@ -734,9 +739,10 @@ class Window(Gtk.ApplicationWindow):
             btn = Gtk.Button(label="Reset all keys")
             btn.set_halign(Gtk.Align.START)
             btn.set_sensitive(not self.keys_busy)
-            btn.connect("clicked", lambda *_: self._keys_run(
+            btn.connect("clicked", lambda *_: ([self._unassign_macro(k.name) for k in keymap.REMAPPABLE],
+                                               self._keys_run(
                 lambda: keymap.reset_all(iface.devnode, handle=self.handle),
-                lambda now: "All keys are back to default."))
+                lambda now: "All keys are back to default.")))
             rc.append(btn)
             page.append(rc)
 
@@ -755,7 +761,7 @@ class Window(Gtk.ApplicationWindow):
             inner.append(label(cap, xalign=0.5, wrap=False))
             remapped = k is not None and k.remappable and cur[k.name] != k.default
             if remapped:
-                target = keymap.TARGETS.get(cur[k.name], f"0x{cur[k.name]:02x}")
+                target = "Macro" if cur[k.name] >= keymap.MACRO_CODE else self._code_name(cur[k.name])
                 inner.append(label("→ " + keymap.SHORT_TARGETS.get(target, target), "keycap-sub",
                                    xalign=0.5, wrap=False))
                 btn.add_css_class("remapped")
@@ -764,7 +770,7 @@ class Window(Gtk.ApplicationWindow):
                 btn.set_sensitive(False)
                 btn.set_tooltip_text(f"{name} can't be remapped yet")
             else:
-                tip = f"{name}: sends {keymap.TARGETS.get(cur[name], hex(cur[name]))}"
+                tip = f"{name}: sends {self._code_name(cur[name])}"
                 btn.set_tooltip_text(tip)
                 set_accessible_label(btn, tip)
                 if name == self.keys_selected:
@@ -776,6 +782,23 @@ class Window(Gtk.ApplicationWindow):
             parent.remove(self.keyboard_view)
         self.keyboard_view.set_keys(buttons)
         return self.keyboard_view
+
+    def _code_name(self, code):
+        if code >= keymap.MACRO_CODE:
+            slot = code - keymap.MACRO_CODE
+            assigned = [m for m in self.macro_list if m.key]
+            return f"macro “{assigned[slot].name}”" if slot < len(assigned) else "a macro"
+        return keymap.TARGETS.get(code, f"code 0x{code:02x}")
+
+    def _unassign_macro(self, key_name):
+        """Keep macros.json in sync when the Keys tab overwrites a key that plays a macro."""
+        changed = False
+        for m in self.macro_list:
+            if m.key == key_name:
+                m.key = None
+                changed = True
+        if changed:
+            macros.save(self.macro_list)
 
     def _select_key(self, name):
         self.keys_selected = name
@@ -801,6 +824,7 @@ class Window(Gtk.ApplicationWindow):
             code = codes[dd.get_selected()]
             if cur.get(key.name) == code:
                 return
+            self._unassign_macro(key.name)
             self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: code}, handle=self.handle),
                            lambda now: f"{key.name} now sends {keymap.TARGETS[code]}.")
         apply_btn.connect("clicked", do_remap)
@@ -808,9 +832,9 @@ class Window(Gtk.ApplicationWindow):
         if cur[key.name] != key.default:
             undo = Gtk.Button(label=f"Reset {key.name}")
             undo.add_css_class("text")
-            undo.connect("clicked", lambda *_: self._keys_run(
+            undo.connect("clicked", lambda *_: (self._unassign_macro(key.name), self._keys_run(
                 lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
-                lambda now: f"Reset {key.name}."))
+                lambda now: f"Reset {key.name}.")))
             row.append(undo)
         for w in (dd, apply_btn):
             w.set_sensitive(not self.keys_busy)
@@ -827,7 +851,7 @@ class Window(Gtk.ApplicationWindow):
                              "small", "dim"))
         for k in changed:
             r = hbox(10)
-            sends = keymap.TARGETS.get(cur[k.name], f"code 0x{cur[k.name]:02x}")
+            sends = self._code_name(cur[k.name])
             name_btn = Gtk.Button(label=f"{k.name}  →  {sends}")
             name_btn.add_css_class("text")
             name_btn.set_hexpand(True)
@@ -839,9 +863,9 @@ class Window(Gtk.ApplicationWindow):
             undo.add_css_class("text")
             set_accessible_label(undo, f"Reset {k.name}")
             undo.set_sensitive(not self.keys_busy)
-            undo.connect("clicked", lambda *_, key=k: self._keys_run(
+            undo.connect("clicked", lambda *_, key=k: (self._unassign_macro(key.name), self._keys_run(
                 lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
-                lambda now, key=key: f"Reset {key.name}."))
+                lambda now, key=key: f"Reset {key.name}.")))
             r.append(undo)
             box.append(r)
         return box
@@ -866,6 +890,8 @@ class Window(Gtk.ApplicationWindow):
             except keymap.UnexpectedKeymap as e:
                 result = (None, (f"The key map doesn't look as expected, so nothing was changed. {e}",
                                  "error-text"))
+            except ValueError as e:
+                result = (None, (str(e), "error-text"))
             except AccessDenied:
                 result = (None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
             except DeviceGone:
@@ -883,6 +909,190 @@ class Window(Gtk.ApplicationWindow):
         self.render()
         self.say(self.keys_message[0])
         return False
+
+    # --- macros tab ------------------------------------------------------------------
+
+    def render_macros(self, iface):
+        page = self.macros_page
+        clear(page)
+        page.append(section("Macros", "Macros play key presses with pauses when you press a key. They're "
+                                      "stored in the keyboard, so they work on any computer. G1–G4 can only "
+                                      "be recorded on the keyboard itself (MR)."))
+        if self.editing is not None:
+            page.append(self._macro_editor(iface))
+            return
+        card = vbox(12, "card")
+        if not self.macro_list:
+            card.append(label("No macros yet. Create one, then assign it to a key.", "small", "dim"))
+        for i, m in enumerate(self.macro_list):
+            if i:
+                card.append(Gtk.Box(css_classes=["divider"]))
+            row = hbox(10)
+            text = vbox(2)
+            text.set_hexpand(True)
+            text.append(label(m.name, "heading"))
+            how = "while held" if m.held else (f"{m.count} times" if m.count > 1 else "once")
+            where = f"on {m.key}" if m.key else "not assigned"
+            text.append(label(f"{len(m.steps)} steps · plays {how} · {where}", "small", "dim"))
+            row.append(text)
+            edit = Gtk.Button(label="Edit")
+            edit.connect("clicked", lambda *_, i=i: self._edit_macro(i))
+            row.append(edit)
+            delete = Gtk.Button(label="Delete")
+            delete.add_css_class("text")
+            set_accessible_label(delete, f"Delete {m.name}")
+            delete.connect("clicked", lambda *_, i=i: self._delete_macro(iface, i))
+            row.append(delete)
+            card.append(row)
+        new = Gtk.Button(label="New macro")
+        new.add_css_class("filled")
+        new.set_halign(Gtk.Align.START)
+        new.connect("clicked", lambda *_: self._edit_macro(None))
+        card.append(new)
+        text, kind = self.keys_message
+        if text:
+            card.append(label(text, "small", kind))
+        card.append(label("Horus Control keeps your macros in ~/.config/horus-control/macros.json, because "
+                          "the keyboard can't report them back. Applying macros here replaces macros set in "
+                          "Redragon's software.", "small", "faint"))
+        page.append(card)
+
+    def _edit_macro(self, index):
+        import copy
+        m = copy.deepcopy(self.macro_list[index]) if index is not None else macros.Macro(
+            "New macro", [macros.Step(0x04, True, 30), macros.Step(0x04, False, 30)])
+        self.editing = (index, m)
+        self.keys_message = ("", "dim")
+        GLib.idle_add(lambda: (self.render(), False)[1])
+
+    def _delete_macro(self, iface, index):
+        removed = self.macro_list.pop(index)
+        macros.save(self.macro_list)
+        if removed.key and iface is not None and iface.access:
+            self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
+                           lambda now: f"Deleted {removed.name}. {removed.key} types normally again.")
+        else:
+            self.keys_message = (f"Deleted {removed.name}.", "dim")
+            GLib.idle_add(lambda: (self.render(), False)[1])
+
+    def _macro_editor(self, iface) -> Gtk.Widget:
+        index, m = self.editing
+        codes = list(keymap.TARGETS)
+        card = vbox(14, "card")
+        name = Gtk.Entry(text=m.name)
+        set_accessible_label(name, "Macro name")
+        name.connect("changed", lambda e: setattr(m, "name", e.get_text()))
+        card.append(label("Name", "heading"))
+        card.append(name)
+
+        card.append(label("Steps", "heading"))
+        card.append(label("Each step presses or releases a key, then pauses. Pauses up to 127 ms can be any "
+                          "value; longer pauses go in steps of 100 ms.", "small", "dim"))
+        for i, st in enumerate(m.steps):
+            row = hbox(8)
+            act = Gtk.DropDown.new_from_strings(["Press", "Release"])
+            act.set_selected(0 if st.down else 1)
+            set_accessible_label(act, f"Step {i + 1} action")
+            act.connect("notify::selected", lambda d, _p, st=st: setattr(st, "down", d.get_selected() == 0))
+            row.append(act)
+            key = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
+            key.set_selected(codes.index(st.key) if st.key in codes else 0)
+            set_accessible_label(key, f"Step {i + 1} key")
+            key.connect("notify::selected", lambda d, _p, st=st: setattr(st, "key", codes[d.get_selected()]))
+            row.append(key)
+            row.append(label("then wait", "dim", wrap=False))
+            spin = Gtk.SpinButton.new_with_range(0, macros.LONG_MAX, 10)
+            spin.set_value(st.pause)
+            set_accessible_label(spin, f"Step {i + 1} pause in milliseconds")
+            spin.connect("value-changed", lambda w, st=st: setattr(st, "pause", int(w.get_value())))
+            row.append(spin)
+            row.append(label("ms", "dim", wrap=False))
+            rm = icon_button("list-remove-symbolic", f"Remove step {i + 1}",
+                             lambda i=i: (m.steps.pop(i), self.render()))
+            row.append(rm)
+            card.append(row)
+        add = hbox(8)
+        tap = Gtk.Button(label="Add key press")
+        tap.set_tooltip_text("Adds a press and a release of the same key, 30 ms apart")
+        tap.connect("clicked", lambda *_: (m.steps.extend([macros.Step(0x04, True, 30), macros.Step(0x04, False, 30)]),
+                                           self.render()))
+        add.append(tap)
+        one = Gtk.Button(label="Add step")
+        one.add_css_class("text")
+        one.connect("clicked", lambda *_: (m.steps.append(macros.Step(0x04, True, 30)), self.render()))
+        add.append(one)
+        card.append(add)
+
+        card.append(Gtk.Box(css_classes=["divider"]))
+        card.append(self._group_row("Repeat", "Play it a number of times, or keep repeating while the key is held.",
+                                    [("times", "Number of times"), ("held", "While held")],
+                                    "held" if m.held else "times",
+                                    lambda v: (setattr(m, "held", v == "held"),
+                                               GLib.idle_add(lambda: (self.render(), False)[1]))))
+        if not m.held:
+            row = hbox(8)
+            row.append(label("Times", "dim", wrap=False))
+            count = Gtk.SpinButton.new_with_range(1, 255, 1)
+            count.set_value(m.count)
+            set_accessible_label(count, "Number of times")
+            count.connect("value-changed", lambda w: setattr(m, "count", int(w.get_value())))
+            row.append(count)
+            card.append(row)
+
+        card.append(Gtk.Box(css_classes=["divider"]))
+        card.append(label("Key", "heading"))
+        names = ["Not assigned"] + [k.name for k in keymap.REMAPPABLE]
+        key_dd = Gtk.DropDown.new_from_strings(names)
+        key_dd.set_selected(names.index(m.key) if m.key in names else 0)
+        key_dd.set_halign(Gtk.Align.START)
+        set_accessible_label(key_dd, "Key that plays the macro")
+        key_dd.connect("notify::selected", lambda d, _p: setattr(m, "key", None if d.get_selected() == 0
+                                                                   else names[d.get_selected()]))
+        card.append(key_dd)
+        card.append(label("The key stops typing its own character while the macro is on it.", "small", "dim"))
+
+        text, kind = self.keys_message
+        if text:
+            card.append(label(text, "small", kind))
+        btns = hbox(8)
+        save = Gtk.Button(label="Save and apply" if iface is not None and iface.access else "Save")
+        save.add_css_class("filled")
+        save.set_sensitive(not self.keys_busy)
+        save.connect("clicked", lambda *_: self._save_macro(iface))
+        btns.append(save)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.add_css_class("text")
+        cancel.connect("clicked", lambda *_: (setattr(self, "editing", None), self.render()))
+        btns.append(cancel)
+        card.append(btns)
+        return card
+
+    def _save_macro(self, iface):
+        index, m = self.editing
+        try:
+            macros.validate(m)
+            if m.key and any(o.key == m.key for j, o in enumerate(self.macro_list) if j != index):
+                raise ValueError(f"Another macro is already on {m.key}.")
+            new_list = list(self.macro_list)
+            if index is None:
+                new_list.append(m)
+            else:
+                new_list[index] = m
+            if len([x for x in new_list if x.key]) > macros.SLOTS:
+                raise ValueError(f"The keyboard holds up to {macros.SLOTS} assigned macros.")
+        except ValueError as e:
+            self.keys_message = (str(e), "error-text")
+            self.render()
+            return
+        self.macro_list = new_list
+        macros.save(self.macro_list)
+        self.editing = None
+        if iface is not None and iface.access:
+            self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
+                           lambda now: f"Saved {m.name}" + (f". {m.key} plays it now." if m.key else "."))
+        else:
+            self.keys_message = (f"Saved {m.name}. Connect the keyboard to apply it.", "dim")
+            self.render()
 
     # --- lighting tab ------------------------------------------------------------
 

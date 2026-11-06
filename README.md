@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: v0.7.3.** It finds the keyboard, picks its configuration interface
+**Status: v0.8.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.7.3-x86_64.AppImage
+./dist/Horus_Control-0.8.0-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -123,6 +123,22 @@ F1–F24, navigation and editing keys, or modifiers. Not yet: media keys. Remapp
 modifier (for example Caps Lock to Ctrl) isn't offered by Redragon's software; it uses the same entry
 format as the keyboard's own modifier keys. **Reset all keys** restores every key's
 default code and works with the mouse alone.
+
+## Macros tab
+
+Macros are key presses and releases with pauses, played by a normal key, stored in the keyboard.
+Decoded from four macros saved by Redragon's software (all reproduced byte for byte):
+
+- Macro block, saved with `06 05 e8 00 40 00 00 00`: 128-byte slots. A slot is `00`, the repeat
+  count, then 2-byte events `[timing, key]`. `0x80` in timing = key release; its low 7 bits = pause
+  after the event in ms (1–127). Longer pauses: timing `03`, then `00 03` and a 2-byte count of 100 ms.
+- The key's key map entry: `10 00 <mode> <0x18 + slot>`, mode `01` = repeat N times, `04` = while held.
+- Save order: read key map, write macro block, write key map.
+
+The keyboard can't report macros back, so Horus Control keeps them in
+`~/.config/horus-control/macros.json` and writes all assigned macros together (up to 8). This
+replaces macros set in Redragon's software. G1–G4 (recorded with MR on the keyboard) and mouse
+buttons aren't supported.
 
 ## Finding what each setting does
 

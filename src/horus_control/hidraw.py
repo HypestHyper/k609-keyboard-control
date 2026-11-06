@@ -5,7 +5,8 @@ official Redragon software: a command from ALLOWED_COMMANDS on report 0x05 (the
 read request); the lighting block saved back on report 0x06, checked by
 is_lighting_write(); and the colour table on report 0x06, which must equal the
 recorded table except for the Fixed on colour (is_colour_table_write()); and the key map
-saved back on report 0x06 (is_keymap_write(); only keymap.py builds it).
+saved back on report 0x06 (is_keymap_write(); only keymap.py builds it); and the macro block
+(is_macro_write(); only macros.py builds it).
 There is no output-report or write() call anywhere.
 """
 
@@ -175,6 +176,7 @@ READ_KEYMAP = bytes.fromhex("0584d8000000")
 KEYMAP_REPLY_PREFIX = bytes.fromhex("0684d8")
 ALLOWED_COMMANDS = frozenset({READ_LIGHTING, READ_KEYMAP})
 KEYMAP_WRITE_HEADER = bytes.fromhex("0604d80040000000")   # as the official software saves the key map
+MACRO_WRITE_HEADER = bytes.fromhex("0605e80040000000")    # as the official software saves macros
 BLOCK_BUFFER_LEN = 1032
 
 
@@ -264,7 +266,13 @@ def is_keymap_write(buf: bytes) -> bool:
     the keyboard's own key map."""
     if len(buf) != BLOCK_BUFFER_LEN or buf[:8] != KEYMAP_WRITE_HEADER:
         return False
-    return all(buf[i] in (0x00, 0x02, 0x04, 0x06, 0x0E, 0x20) for i in range(8, BLOCK_BUFFER_LEN, 4))
+    return all(buf[i] in (0x00, 0x02, 0x04, 0x06, 0x0E, 0x10, 0x20) for i in range(8, BLOCK_BUFFER_LEN, 4))
+
+
+def is_macro_write(buf: bytes) -> bool:
+    """A macro block save: the official software's header, 1032 bytes, slots starting with 00."""
+    return (len(buf) == BLOCK_BUFFER_LEN and buf[:8] == MACRO_WRITE_HEADER
+            and all(buf[i] == 0 for i in range(8, BLOCK_BUFFER_LEN, 128)))
 
 
 def is_colour_table_write(buf: bytes) -> bool:
@@ -400,6 +408,16 @@ class Session:
     def write_keymap(self, payload: bytes) -> None:
         if not is_keymap_write(payload):
             raise ValueError("not a key map write")
+        buf = bytearray(payload)
+        try:
+            self._ioctl(self.fd, hidiocsfeature(len(buf)), buf, True)
+        except OSError as e:
+            self._gone(e)
+            raise WriteFailed(os.strerror(e.errno or 0)) from e
+
+    def write_macros(self, payload: bytes) -> None:
+        if not is_macro_write(payload):
+            raise ValueError("not a macro block write")
         buf = bytearray(payload)
         try:
             self._ioctl(self.fd, hidiocsfeature(len(buf)), buf, True)
