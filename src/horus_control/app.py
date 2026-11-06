@@ -14,7 +14,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__, capabilities, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
-from .hidraw import AccessDenied, DeviceGone, hexdump, read_lighting_block  # noqa: E402
+from .hidraw import AccessDenied, DeviceGone, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -123,6 +123,9 @@ class Window(Gtk.ApplicationWindow):
         self.reading = False
         self.feature_results = None             # (devnode, results) or None
         self.feature_message = ""
+        self.previous_block = None              # (devnode, bytes) of the last good read
+        self.last_change = None                 # None = first read, "" = no change, else text
+        self.change_log: list[str] = []
 
         root = vbox()
         self.set_child(root)
@@ -426,6 +429,14 @@ class Window(Gtk.ApplicationWindow):
                               "effect names not known yet")
                     self._row(grid, 1, "Byte 20", f"0x{res.data[20]:02x}  ·  meaning not known yet")
                     inner.append(grid)
+                    if self.last_change is None:
+                        text = ("First read. Change one thing in Redragon's software, then read again "
+                                "to see which bytes changed.")
+                    elif not self.last_change:
+                        text = "No change since the last read."
+                    else:
+                        text = f"Changed since the last read: {self.last_change}"
+                    inner.append(label(text, "small", *([] if self.last_change else ["dim"])))
                 inner.append(label("Only bytes 20 and 21 have been seen to change. Everything else is "
                                    "unexplained so far.", "small", "faint"))
                 if res.data:
@@ -491,6 +502,17 @@ class Window(Gtk.ApplicationWindow):
         self.reading = False
         if results is not None:
             self.feature_results = (devnode, results)
+            res = results[0]
+            if res.ok:
+                if self.previous_block and self.previous_block[0] == devnode:
+                    self.last_change = describe_diff(diff_blocks(self.previous_block[1], res.data))
+                else:
+                    self.last_change = None
+                self.previous_block = (devnode, res.data)
+                n = len(self.change_log) + 1
+                self.change_log.append(f"Read {n}: effect byte 21 = {res.data[21]:02x}; "
+                                       + ("first read" if self.last_change is None
+                                          else self.last_change or "no change"))
             message = "Read the lighting settings." if results[0].ok else "The read didn't work."
         self.feature_message = message
         self.render()
@@ -512,6 +534,9 @@ class Window(Gtk.ApplicationWindow):
                 lines.append(f"Lighting block (SET_FEATURE 05 83 c6 00 00 00, then GET_FEATURE 0x06): "
                              f"{len(r.data)} bytes {r.problem}".rstrip())
                 lines.append(hexdump(r.data))
+        if self.change_log:
+            lines.append("Reads this session:")
+            lines += [f"  {line}" for line in self.change_log]
         return "\n".join(lines) + "\n"
 
     def _copy(self, text, button):

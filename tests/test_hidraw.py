@@ -167,3 +167,12 @@ def test_read_lighting_errors():
                                    closer=dev.close, sleep=lambda s: None)
     with pytest.raises(AccessDenied):
         hidraw.read_lighting_block("/dev/x", opener=FakeDevice(open_error=errno.EACCES).open)
+
+
+def test_diff_blocks():
+    a = BLOCK
+    b = bytearray(BLOCK); b[21] = 0x07; b[20] = 0x01
+    assert hidraw.diff_blocks(a, bytes(b)) == [(20, 0, 1), (21, 0x0e, 0x07)]
+    assert hidraw.describe_diff(hidraw.diff_blocks(a, bytes(b))) == "byte 20: 00 → 01, byte 21: 0e → 07"
+    assert hidraw.diff_blocks(a, a) == []
+    assert hidraw.diff_blocks(a, a[:-1]) == [(len(a) - 1, a[-1], None)]

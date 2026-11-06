@@ -275,6 +275,22 @@ def read_feature_reports(devnode: str, reports, *, opener=os.open, ioctl=fcntl.i
     return results
 
 
+def diff_blocks(old: bytes, new: bytes, start: int = 3) -> list[tuple[int, int | None, int | None]]:
+    """Byte offsets that differ between two settings blocks, skipping the 3-byte header."""
+    out = []
+    for i in range(start, max(len(old), len(new))):
+        a = old[i] if i < len(old) else None
+        b = new[i] if i < len(new) else None
+        if a != b:
+            out.append((i, a, b))
+    return out
+
+
+def describe_diff(changes) -> str:
+    fmt = lambda v: "--" if v is None else f"{v:02x}"
+    return ", ".join(f"byte {i}: {fmt(a)} → {fmt(b)}" for i, a, b in changes)
+
+
 def hexdump(data: bytes, width: int = 16) -> str:
     lines = []
     for off in range(0, len(data), width):
