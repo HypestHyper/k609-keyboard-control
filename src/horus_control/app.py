@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import __version__, capabilities, keymap, lighting, macros, settings as settings_mod  # noqa: E402
+from . import __version__, capabilities, keymap, lighting, macros, profiles, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
@@ -295,6 +295,7 @@ class Window(Gtk.ApplicationWindow):
                 ("lighting", "Lighting", "display-brightness-symbolic"),
                 ("keys", "Keys", "input-keyboard-symbolic"),
                 ("macros", "Macros", "media-record-symbolic"),
+                ("profiles", "Profiles", "document-save-symbolic"),
                 ("settings", "Settings", "preferences-system-symbolic"))):
             btn = Gtk.ToggleButton(tooltip_text=f"{title} (Alt+{i + 1})")
             inner = hbox(8)
@@ -321,6 +322,12 @@ class Window(Gtk.ApplicationWindow):
         self.macros_page = self._page("macros")
         self.macro_list = macros.load()
         self.editing = None                     # (index or None for new, working copy) while editing
+        self.profiles_page = self._page("profiles")
+        self.profile_busy = False
+        self.profile_message = ("", "dim")
+        self.profile_name = Gtk.Entry(placeholder_text="Profile name, for example Gaming", hexpand=True)
+        set_accessible_label(self.profile_name, "Name for the new profile")
+        self.profile_name.connect("activate", lambda *_: self._save_profile(self._iface()))
         self.light_state = None                 # (devnode, lighting.State) once loaded
         self.handle = Handle()                  # kept open between operations, like the official software
         self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
@@ -423,6 +430,7 @@ class Window(Gtk.ApplicationWindow):
         self.render_lighting(iface)
         self.render_keys(iface)
         self.render_macros(iface)
+        self.render_profiles(iface)
         clear(self.status_holder)
         if not self.keyboards:
             self.status_holder.append(chip("Not found", "neutral", "dialog-information-symbolic"))
@@ -668,7 +676,8 @@ class Window(Gtk.ApplicationWindow):
             text.append(label(cap.evidence, "small", "dim"))
             row.append(text)
             usable = cap.status in (capabilities.Status.HARDWARE, capabilities.Status.HOST)
-            where = {"remapping": "On the Keys tab", "macros": "On the Macros tab"}.get(cap.key, "On the Lighting tab")
+            where = {"remapping": "On the Keys tab", "macros": "On the Macros tab",
+                     "profiles": "On the Profiles tab"}.get(cap.key, "On the Lighting tab")
             c = chip(where, "ok") if usable else chip("Not yet verified", "neutral")
             c.set_valign(Gtk.Align.CENTER)
             row.append(c)
@@ -1217,6 +1226,152 @@ class Window(Gtk.ApplicationWindow):
         else:
             self.keys_message = (f"Saved {m.name}. Connect the keyboard to apply it.", "dim")
             self.render()
+
+    # --- profiles tab ----------------------------------------------------------------
+
+    def _iface(self):
+        kb = self.current()
+        return kb.config_interface if kb else None
+
+    def render_profiles(self, iface):
+        page = self.profiles_page
+        clear(page)
+        page.append(section("Profiles", "A profile holds the lighting, key remaps and macros. Applying one "
+                                        "writes them all to the keyboard. The keyboard has no profiles of its "
+                                        "own, so they're stored by Horus Control."))
+        ready = iface is not None and iface.access
+        card = vbox(10, "card")
+        card.append(label("Save the current settings", "heading"))
+        row = hbox(10)
+        if (parent := self.profile_name.get_parent()) is not None:
+            parent.remove(self.profile_name)
+        row.append(self.profile_name)
+        save = Gtk.Button(label="Saving…" if self.profile_busy else "Save profile")
+        save.add_css_class("filled")
+        save.set_sensitive(ready and not self.profile_busy)
+        save.connect("clicked", lambda *_: self._save_profile(iface))
+        row.append(save)
+        card.append(row)
+        if not ready:
+            card.append(label("Connect the keyboard to save or apply profiles.", "small", "dim"))
+        text, kind = self.profile_message
+        if text:
+            card.append(label(text, "small", kind))
+        page.append(card)
+
+        saved = profiles.load_all()
+        page.append(section("Saved profiles", None))
+        lst = vbox(12, "card")
+        if not saved:
+            lst.append(label("No profiles yet.", "small", "dim"))
+        for i, p in enumerate(saved):
+            if i:
+                lst.append(Gtk.Box(css_classes=["divider"]))
+            row = hbox(10)
+            text = vbox(2)
+            text.set_hexpand(True)
+            text.append(label(p.name, "heading"))
+            remapped = sum(1 for k in keymap.REMAPPABLE if p.keys.get(k.name, k.default) != k.default)
+            assigned = sum(1 for m in p.macros if m.key)
+            colour = f" · colour #{p.colour}" if p.colour and p.effect == 0x01 else ""
+            text.append(label(f"{lighting.EFFECTS[p.effect]}{colour} · {remapped} remapped "
+                              f"key{'s' if remapped != 1 else ''} · {assigned} macro{'s' if assigned != 1 else ''}",
+                              "small", "dim"))
+            row.append(text)
+            apply_btn = Gtk.Button(label="Apply")
+            apply_btn.add_css_class("filled")
+            apply_btn.set_sensitive(ready and not self.profile_busy)
+            apply_btn.connect("clicked", lambda *_, p=p: self._apply_profile(iface, p))
+            row.append(apply_btn)
+            bind = Gtk.Button(label="Copy binding")
+            bind.add_css_class("text")
+            bind.set_tooltip_text("Copies a Hyprland line that applies this profile from a key")
+            bind.connect("clicked", lambda *_, p=p, b=bind: self._copy(self._binding(p), b))
+            row.append(bind)
+            delete = Gtk.Button(label="Delete")
+            delete.add_css_class("text")
+            set_accessible_label(delete, f"Delete profile {p.name}")
+            delete.connect("clicked", lambda *_, p=p: self._delete_profile(p))
+            row.append(delete)
+            lst.append(row)
+        if saved:
+            lst.append(label("To switch profiles from the keyboard: remap a spare key to F13–F24 on the Keys tab, "
+                             "copy a binding, paste it into your Hyprland config and change F13 to that key.",
+                             "small", "faint"))
+        page.append(lst)
+
+    @staticmethod
+    def _binding(p) -> str:
+        """A Hyprland line for this profile (F13 as a placeholder key)."""
+        exe = os.environ.get("APPIMAGE") or "horus-control"
+        return f'bind = , F13, exec, "{exe}" --apply-profile "{p.name}"\n'
+
+    def _save_profile(self, iface):
+        name = self.profile_name.get_text().strip()
+        if not name:
+            self.profile_message = ("Type a name for the profile first.", "error-text")
+            self.render()
+            return
+        existing = profiles.find(name)
+        colour = self.app.settings.fixed_colour or None
+        current = list(self.macro_list)
+        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current,
+                                                                            handle=self.handle)),
+                          lambda _r: f"{'Updated' if existing else 'Saved'} profile “{name}”.",
+                          clear_name=True)
+
+    def _apply_profile(self, iface, p):
+        def job(dev):
+            profiles.apply(dev, p, handle=self.handle)
+            return p
+        self._profile_run(iface, job, lambda _r: f"Applied profile “{p.name}”.", applied=True)
+
+    def _delete_profile(self, p):
+        try:
+            profiles.delete(p.name)
+            self.profile_message = (f"Deleted profile “{p.name}”.", "dim")
+        except OSError as e:
+            self.profile_message = (f"Couldn't delete it: {e.strerror}.", "error-text")
+        self.render()
+
+    def _profile_run(self, iface, job, describe, clear_name=False, applied=False):
+        if iface is None or not iface.access or self.profile_busy:
+            return
+        self.profile_busy = True
+        self.profile_message = ("", "dim")
+        self.render()
+        devnode = iface.devnode
+
+        def work():
+            try:
+                r = job(devnode)
+                result = (True, r, (describe(r), "dim"))
+            except AccessDenied:
+                result = (False, None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+            except DeviceGone:
+                result = (False, None, ("The keyboard was disconnected.", "error-text"))
+            except (ValueError, RuntimeError, OSError) as e:
+                result = (False, None, (f"That didn't work: {e}", "error-text"))
+            GLib.idle_add(done, result)
+
+        def done(result):
+            ok, r, self.profile_message = result
+            self.profile_busy = False
+            if ok and clear_name:
+                self.profile_name.set_text("")
+            if ok and applied:
+                import copy
+                self.macro_list = copy.deepcopy(r.macros)
+                macros.save(self.macro_list)
+                if r.colour:
+                    self.app.change(fixed_colour=r.colour)
+                    self.picker_rgb = None
+                self.keys_state = None          # reload from the keyboard next time
+                self.light_state = None
+            self.render()
+            self.say(self.profile_message[0])
+            return False
+        threading.Thread(target=work, daemon=True).start()
 
     # --- lighting tab ------------------------------------------------------------
 

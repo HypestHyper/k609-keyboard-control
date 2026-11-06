@@ -45,8 +45,61 @@ def inspect(read: bool, lighting: bool = False) -> int:
     return 0
 
 
+def notify(text: str, error: bool = False) -> None:
+    print(text, file=sys.stderr if error else sys.stdout)
+    if not sys.stdout.isatty():             # started from a key binding: show a desktop notification
+        import shutil
+        import subprocess
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "Horus Control", "-t", "2500", text],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def apply_profile(name: str) -> int:
+    from . import macros, profiles, settings
+    from .device import find_keyboards
+    from .hidraw import AccessDenied, DeviceGone
+
+    p = profiles.find(name)
+    if p is None:
+        known = ", ".join(x.name for x in profiles.load_all()) or "none saved yet"
+        notify(f"No profile called “{name}”. Profiles: {known}.", error=True)
+        return 2
+    kbs = [k for k in find_keyboards(os.environ.get("HORUS_CONTROL_SYSFS", "/sys")) if k.config_interface]
+    if len(kbs) != 1:
+        notify("Keyboard not found." if not kbs else "More than one K609GG is connected.", error=True)
+        return 1
+    try:
+        profiles.apply(kbs[0].config_interface.devnode, p)
+    except AccessDenied:
+        notify("Can't open the keyboard. Open Horus Control to see how to allow access.", error=True)
+        return 1
+    except (DeviceGone, OSError, ValueError, RuntimeError) as e:
+        notify(f"Couldn't apply “{p.name}”: {e}", error=True)
+        return 1
+    # keep the app's own copies in step with the keyboard
+    macros.save(p.macros)
+    s = settings.load()
+    if p.colour:
+        s.fixed_colour = p.colour
+        settings.save(s)
+    notify(f"Applied profile “{p.name}”.")
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
+    if "--apply-profile" in args:
+        i = args.index("--apply-profile")
+        if i + 1 >= len(args):
+            print("Usage: horus-control --apply-profile NAME", file=sys.stderr)
+            return 2
+        return apply_profile(args[i + 1])
+    if "--list-profiles" in args:
+        from . import profiles
+        for p in profiles.load_all():
+            print(p.name)
+        return 0
     if "--inspect" in args:
         return inspect("--read-features" in args, "--read-lighting" in args)
     if "--version" in args:

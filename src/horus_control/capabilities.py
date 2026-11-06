@@ -34,7 +34,9 @@ CAPABILITIES: tuple[Capability, ...] = (
                "Key presses and pauses on normal keys, decoded from four macros saved by Redragon's "
                "software. G1–G4 and mouse buttons aren't supported."),
     Capability("media_keys", "Media keys", Status.UNKNOWN, "No protocol evidence yet."),
-    Capability("onboard_profiles", "On-board profiles", Status.UNKNOWN, "No protocol evidence yet."),
+    Capability("profiles", "Profiles", Status.HOST,
+               "Saved by Horus Control and written to the keyboard when applied. The keyboard has no "
+               "profiles of its own; Redragon's software works the same way."),
     Capability("polling_rate", "Polling rate", Status.UNKNOWN, "No protocol evidence yet."),
 )
 
