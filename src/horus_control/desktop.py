@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from . import APP_ID, COMMENT, KEYWORDS, LAUNCHER_NAME  # noqa: F401  (LAUNCHER_NAME is used by the app)
+from . import APP_ID, COMMENT, GENERIC_NAME, KEYWORDS, LAUNCHER_NAME  # noqa: F401  (LAUNCHER_NAME is used by the app)
 
 RESOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 ICON_SOURCE = os.path.join(RESOURCES, f"{APP_ID}.svg")
@@ -41,7 +41,7 @@ def entry_text(exec_path: str) -> str:
         "[Desktop Entry]",
         "Type=Application",
         f"Name={LAUNCHER_NAME}",
-        f"GenericName={LAUNCHER_NAME}",
+        f"GenericName={GENERIC_NAME}",
         f"Comment={COMMENT}",
         f"Exec={_quote(exec_path)}",
         f"TryExec={exec_path}",

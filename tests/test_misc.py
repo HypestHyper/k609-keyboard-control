@@ -79,7 +79,8 @@ def test_launcher_entry(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert desktop.install("/home/me/Apps/Keyboard Control.AppImage")
     text = open(desktop.entry_path()).read()
-    assert "Name=Keyboard Control" in text and "Comment=Redragon Horus SE K609" in text
+    assert "\nName=Keyboard Control\n" in text and "Comment=Redragon Horus SE K609" in text
+    assert "GenericName=Redragon Horus SE K609 Keyboard Control" in text
     assert 'Exec="/home/me/Apps/Keyboard Control.AppImage"' in text and "Keywords=keyboard;Redragon;" in text
     assert open(desktop.icon_path(), "rb").read() == open(desktop.ICON_SOURCE, "rb").read()
     assert not desktop.install("/home/me/Apps/Keyboard Control.AppImage")      # unchanged
