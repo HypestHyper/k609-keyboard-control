@@ -144,6 +144,9 @@ window.horus expander-widget title, window.horus expander title { padding: px(6)
 window.horus expander-widget arrow, window.horus expander arrow { color: @ON_SURFACE_VARIANT; }
 window.horus textview, window.horus textview text { background-color: transparent; color: @ON_SURFACE; }
 
+window.horus entry { background-color: @SURFACE_CONTAINER_HIGHEST; color: @ON_SURFACE; border: none; box-shadow: none; outline: none; border-radius: px(12)px; min-height: px(38)px; padding: 0 px(12)px; background-image: none; }
+window.horus entry:focus-within { outline: 2px solid @PRIMARY; outline-offset: -2px; }
+window.horus entry > text > placeholder { color: @ON_SURFACE_VARIANT; }
 window.horus dropdown > button { background-color: @SURFACE_CONTAINER_HIGHEST; color: @ON_SURFACE; border-radius: px(12)px; min-height: px(38)px; }
 window.horus popover > contents { background-color: @SURFACE_CONTAINER_HIGH; color: @ON_SURFACE; border-radius: px(16)px; box-shadow: none; border: none; }
 tooltip { background-color: @INVERSE_SURFACE; color: @INVERSE_ON_SURFACE; border-radius: 8px; box-shadow: none; border: none; }

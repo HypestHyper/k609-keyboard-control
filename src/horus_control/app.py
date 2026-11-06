@@ -126,6 +126,10 @@ class Window(Gtk.ApplicationWindow):
         self.previous_block = None              # (devnode, bytes) of the last good read
         self.last_change = None                 # None = first read, "" = no change, else text
         self.change_log: list[str] = []
+        self.pending_note = ""
+        self.note_entry = Gtk.Entry(placeholder_text="What did you just pick? For example: Wave", hexpand=True)
+        set_accessible_label(self.note_entry, "Name of the setting you just picked")
+        self.note_entry.connect("activate", lambda *_: self._read_current())
 
         root = vbox()
         self.set_child(root)
@@ -393,15 +397,22 @@ class Window(Gtk.ApplicationWindow):
         for r, rep in enumerate(desc.reports):
             grid.attach(label(f"{rep.kind.capitalize()} 0x{rep.report_id:02x}", "mono", wrap=False), 0, r, 1, 1)
             grid.attach(label(f"{rep.payload_len} byte{'' if rep.payload_len == 1 else 's'}", "mono", "dim", wrap=False), 1, r, 1, 1)
-        card.append(grid)
+        reports_grid = grid
 
+        card.append(label("Pick and apply one thing in Redragon's software, type what you picked, then "
+                          "press Enter. Horus Control reads the settings and adds what changed to your "
+                          "list.", "small", "dim"))
+        if (parent := self.note_entry.get_parent()) is not None:
+            parent.remove(self.note_entry)
+        self.note_entry.set_sensitive(iface.access)
+        card.append(self.note_entry)
         row = hbox(12)
         read = Gtk.Button(label="Reading…" if self.reading else "Read lighting settings")
         read.add_css_class("filled")
         read.set_sensitive(iface.access and not self.reading)
         read.set_tooltip_text("Sends the same read request as Redragon's software, then reads the "
                               "reply. Doesn't change any setting.")
-        read.connect("clicked", lambda *_: self._read_features(iface))
+        read.connect("clicked", lambda *_: self._read_current())
         row.append(read)
         if self.feature_message:
             msg = label(self.feature_message, "small", "dim")
@@ -447,15 +458,34 @@ class Window(Gtk.ApplicationWindow):
                     exp.set_child(view)
                     inner.append(exp)
                 card.append(inner)
+        if self.change_log:
+            log = vbox(6, "inner")
+            log.append(label("Your list", "heading"))
+            for line in self.change_log:
+                log.append(label(line, "mono", selectable=True))
+            card.append(log)
+        if results or self.change_log:
+            btns = hbox(8)
+            if self.change_log:
+                copy_list = Gtk.Button(label="Copy list")
+                copy_list.connect("clicked", lambda *_: self._copy("\n".join(self.change_log) + "\n", copy_list))
+                btns.append(copy_list)
+                clear_list = Gtk.Button(label="Clear list")
+                clear_list.add_css_class("text")
+                clear_list.set_tooltip_text("Empties the list. The keyboard isn't affected.")
+                clear_list.connect("clicked", lambda *_: self._clear_log())
+                btns.append(clear_list)
             copy = Gtk.Button(label="Copy diagnostics")
             copy.add_css_class("text")
-            copy.set_halign(Gtk.Align.START)
             copy.connect("clicked", lambda *_: self._copy(self._diagnostics(), copy))
-            card.append(copy)
+            btns.append(copy)
+            card.append(btns)
 
         exp = Gtk.Expander(label="Report descriptor")
-        raw = label(" ".join(f"{b:02x}" for b in iface.descriptor_bytes), "mono", selectable=True)
-        exp.set_child(raw)
+        details = vbox(10)
+        details.append(reports_grid)
+        details.append(label(" ".join(f"{b:02x}" for b in iface.descriptor_bytes), "mono", selectable=True))
+        exp.set_child(details)
         card.append(exp)
         return card
 
@@ -478,9 +508,20 @@ class Window(Gtk.ApplicationWindow):
 
     # --- actions ----------------------------------------------------------------
 
+    def _read_current(self):
+        kb = self.current()
+        iface = kb.config_interface if kb else None
+        if iface is not None and iface.access:
+            self._read_features(iface)
+
+    def _clear_log(self):
+        self.change_log.clear()
+        self.render()
+
     def _read_features(self, iface):
         if self.reading:
             return
+        self.pending_note = self.note_entry.get_text().strip()
         self.reading = True
         self.feature_message = ""
         self.render()
@@ -510,12 +551,15 @@ class Window(Gtk.ApplicationWindow):
                     self.last_change = None
                 self.previous_block = (devnode, res.data)
                 n = len(self.change_log) + 1
-                self.change_log.append(f"Read {n}: effect byte 21 = {res.data[21]:02x}; "
-                                       + ("first read" if self.last_change is None
-                                          else self.last_change or "no change"))
+                changes = ("first read" if self.last_change is None
+                           else f"changed {self.last_change}" if self.last_change else "no change")
+                self.change_log.append(f"{n}. {self.pending_note or '(no name)'}: bytes 20–21 = "
+                                       f"{res.data[20]:02x} {res.data[21]:02x}; {changes}")
+                self.note_entry.set_text("")
             message = "Read the lighting settings." if results[0].ok else "The read didn't work."
         self.feature_message = message
         self.render()
+        self.note_entry.grab_focus()
         self.say(message)
         self.scan()
         return False
@@ -535,7 +579,7 @@ class Window(Gtk.ApplicationWindow):
                              f"{len(r.data)} bytes {r.problem}".rstrip())
                 lines.append(hexdump(r.data))
         if self.change_log:
-            lines.append("Reads this session:")
+            lines.append("Your list:")
             lines += [f"  {line}" for line in self.change_log]
         return "\n".join(lines) + "\n"
 

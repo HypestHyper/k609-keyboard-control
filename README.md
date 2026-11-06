@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: inspector (v0.2).** It finds the keyboard, picks its configuration interface
+**Status: inspector (v0.3).** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.2.0-x86_64.AppImage
+./dist/Horus_Control-0.3.0-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -71,6 +71,14 @@ sudo rm /etc/udev/rules.d/70-horus-control.rules && sudo udevadm control --reloa
 ```
 
 The rule uses `TAG+="uaccess"` (a session ACL for the active user), never mode `0666`.
+
+## Finding what each setting does
+
+Open Redragon's software (in Bottles) and Horus Control side by side. Pick and apply one thing in
+Redragon's software, type its name in Horus Control and press Enter. Horus Control reads the
+lighting block and adds the changed bytes to **Your list**. When done, press **Copy list**.
+Horus Control only reads when you press Enter, never in the background, so it can't collide with
+Redragon's own read-then-write of the key map.
 
 ## Settings
 
