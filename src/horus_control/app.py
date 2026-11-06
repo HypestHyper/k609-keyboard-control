@@ -14,7 +14,8 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__, capabilities, lighting, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
-from .hidraw import AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
+from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
+                     diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -123,7 +124,8 @@ class Window(Gtk.ApplicationWindow):
         self.reading = False
         self.feature_results = None             # (devnode, results) or None
         self.feature_message = ""
-        self.previous_block = None              # (devnode, bytes) of the last good read
+        self.previous_block = None              # (devnode, mode, bytes) of the last good read
+        self.read_mode = "lighting"             # what the Keyboard tab reads: "lighting" or "keymap"
         self.last_change = None                 # None = first read, "" = no change, else text
         self.change_log: list[str] = []
         self.pending_note = ""
@@ -306,8 +308,8 @@ class Window(Gtk.ApplicationWindow):
             return
         if not iface.access:
             page.append(self._access_card(iface))
-        page.append(section("Lighting settings", "Reads the keyboard's lighting settings the same way "
-                                                 "Redragon's software does. Nothing is changed."))
+        page.append(section("Read from the keyboard", "Reads the lighting settings or the key map the same "
+                                                      "way Redragon's software does. Nothing is changed."))
         page.append(self._reports_card(iface))
         page.append(section("Features", "Controls appear here only after they are proven to work "
                                         "on this keyboard."))
@@ -412,14 +414,19 @@ class Window(Gtk.ApplicationWindow):
         reports_grid = grid
 
         card.append(label("Pick and apply one thing in Redragon's software, type what you picked, then "
-                          "press Enter. Horus Control reads the settings and adds what changed to your "
+                          "press Enter. Horus Control reads the keyboard and adds what changed to your "
                           "list.", "small", "dim"))
+        card.append(self._group_row("Read", "Key map: remap one key at a time in Redragon's software, "
+                                            "then type which key you changed.",
+                                    [("lighting", "Lighting settings"), ("keymap", "Key map")],
+                                    self.read_mode, self._set_read_mode))
         if (parent := self.note_entry.get_parent()) is not None:
             parent.remove(self.note_entry)
         self.note_entry.set_sensitive(iface.access)
         card.append(self.note_entry)
         row = hbox(12)
-        read = Gtk.Button(label="Reading…" if self.reading else "Read lighting settings")
+        read = Gtk.Button(label="Reading…" if self.reading else
+                          ("Read key map" if self.read_mode == "keymap" else "Read lighting settings"))
         read.add_css_class("filled")
         read.set_sensitive(iface.access and not self.reading)
         read.set_tooltip_text("Sends the same read request as Redragon's software, then reads the "
@@ -438,7 +445,8 @@ class Window(Gtk.ApplicationWindow):
             for res in results:
                 inner = vbox(6, "inner")
                 head = hbox(8)
-                head.append(label(f"Lighting settings · {len(res.data)} bytes", "heading", wrap=False))
+                title = "Key map" if res.data[:3] == bytes.fromhex("0684d8") else "Lighting settings"
+                head.append(label(f"{title} · {len(res.data)} bytes", "heading", wrap=False))
                 if res.ok:
                     head.append(chip("Read", "ok"))
                 else:
@@ -446,11 +454,15 @@ class Window(Gtk.ApplicationWindow):
                 inner.append(head)
                 if res.problem:
                     inner.append(label(res.problem, "small", "error-text"))
+                is_keymap = res.data[:3] == bytes.fromhex("0684d8")
                 if res.ok:
                     grid = Gtk.Grid(column_spacing=20, row_spacing=6)
-                    self._row(grid, 0, "Byte 21", f"0x{res.data[21]:02x}  ·  changes when the effect changes; "
-                              "effect names not known yet")
-                    self._row(grid, 1, "Byte 20", f"0x{res.data[20]:02x}  ·  meaning not known yet")
+                    if is_keymap:
+                        self._row(grid, 0, "Caps Lock", "entry 143 (confirmed). Other keys not mapped yet")
+                    else:
+                        self._row(grid, 0, "Byte 21", f"0x{res.data[21]:02x}  ·  changes when the effect changes; "
+                                  "effect names not known yet")
+                        self._row(grid, 1, "Byte 20", f"0x{res.data[20]:02x}  ·  meaning not known yet")
                     inner.append(grid)
                     if self.last_change is None:
                         text = ("First read. Change one thing in Redragon's software, then read again "
@@ -460,8 +472,9 @@ class Window(Gtk.ApplicationWindow):
                     else:
                         text = f"Changed since the last read: {self.last_change}"
                     inner.append(label(text, "small", *([] if self.last_change else ["dim"])))
-                inner.append(label("Only bytes 20 and 21 have been seen to change. Everything else is "
-                                   "unexplained so far.", "small", "faint"))
+                if not is_keymap:
+                    inner.append(label("Only bytes 20 and 21 have been seen to change. Everything else is "
+                                       "unexplained so far.", "small", "faint"))
                 if res.data:
                     exp = Gtk.Expander(label="Show bytes")
                     view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False)
@@ -527,6 +540,11 @@ class Window(Gtk.ApplicationWindow):
         if iface is not None and iface.access:
             self._read_features(iface)
 
+    def _set_read_mode(self, mode):
+        self.read_mode = mode
+        self.feature_message = ""
+        GLib.idle_add(lambda: (self.render(), False)[1])
+
     def _clear_log(self):
         self.change_log.clear()
         self.render()
@@ -539,37 +557,44 @@ class Window(Gtk.ApplicationWindow):
         self.feature_message = ""
         self.render()
         devnode = iface.devnode
+        mode = self.read_mode
+        reader = read_keymap_block if mode == "keymap" else read_lighting_block
 
         def work():
             try:
-                res, msg = [read_lighting_block(devnode, handle=self.handle)], ""
+                res, msg = [reader(devnode, handle=self.handle)], ""
             except AccessDenied:
                 res, msg = None, "Access denied. See the instructions above."
             except DeviceGone:
                 res, msg = None, "The keyboard was disconnected during the read."
             except OSError as e:
                 res, msg = None, f"Couldn't open {devnode}: {e.strerror}."
-            GLib.idle_add(self._read_done, devnode, res, msg)
+            GLib.idle_add(self._read_done, devnode, res, msg, mode)
         threading.Thread(target=work, daemon=True).start()
 
-    def _read_done(self, devnode, results, message):
+    def _read_done(self, devnode, results, message, mode="lighting"):
         self.reading = False
         if results is not None:
             self.feature_results = (devnode, results)
             res = results[0]
             if res.ok:
-                if self.previous_block and self.previous_block[0] == devnode:
-                    self.last_change = describe_diff(diff_blocks(self.previous_block[1], res.data))
+                prev = self.previous_block
+                if prev and prev[0] == devnode and prev[1] == mode:
+                    differ = describe_keymap_diff if mode == "keymap" else (
+                        lambda a, b: describe_diff(diff_blocks(a, b)))
+                    self.last_change = differ(prev[2], res.data)
                 else:
                     self.last_change = None
-                self.previous_block = (devnode, res.data)
+                self.previous_block = (devnode, mode, res.data)
                 n = len(self.change_log) + 1
                 changes = ("first read" if self.last_change is None
                            else f"changed {self.last_change}" if self.last_change else "no change")
-                self.change_log.append(f"{n}. {self.pending_note or '(no name)'}: bytes 20–21 = "
-                                       f"{res.data[20]:02x} {res.data[21]:02x}; {changes}")
+                what = ("key map" if mode == "keymap"
+                        else f"bytes 20–21 = {res.data[20]:02x} {res.data[21]:02x}")
+                self.change_log.append(f"{n}. {self.pending_note or '(no name)'}: {what}; {changes}")
                 self.note_entry.set_text("")
-            message = "Read the lighting settings." if results[0].ok else "The read didn't work."
+            message = (("Read the key map." if mode == "keymap" else "Read the lighting settings.")
+                       if results[0].ok else "The read didn't work.")
         self.feature_message = message
         self.render()
         self.note_entry.grab_focus()
@@ -588,7 +613,8 @@ class Window(Gtk.ApplicationWindow):
                          + " ".join(f"{b:02x}" for b in i.descriptor_bytes))
         if self.feature_results:
             for r in self.feature_results[1]:
-                lines.append(f"Lighting block (SET_FEATURE 05 83 c6 00 00 00, then GET_FEATURE 0x06): "
+                cmd = "05 84 d8" if r.data[:3] == bytes.fromhex("0684d8") else "05 83 c6"
+                lines.append(f"Block read (SET_FEATURE {cmd} 00 00 00, then GET_FEATURE 0x06): "
                              f"{len(r.data)} bytes {r.problem}".rstrip())
                 lines.append(hexdump(r.data))
         if self.change_log:

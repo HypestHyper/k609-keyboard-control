@@ -3,7 +3,7 @@
 - Spec: the Horus Control handover brief. UI follows the GTK App Family design language. Neither file is in this repo; ask the user if you need them.
 - **Never add a HID write** (SET_FEATURE, output report, write()) until a K609GG protocol is
   proven with evidence and the user has reviewed it. Approved so far: the read command in
-  `hidraw.ALLOWED_COMMANDS` (`05 83 c6 00 00 00`), plus these writes,
+  `hidraw.ALLOWED_COMMANDS` (`05 83 c6 00 00 00` lighting, `05 84 d8 00 00 00` key map), plus these writes,
   each copied from captures of the official software: the lighting block
   save (`06 03 c6`, only decoded bytes changed) and the colour table (`06 08 c8`, must equal
   `colour_table.hex` except bytes 29–31). Anything new needs the same capture evidence and user

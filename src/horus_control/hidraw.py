@@ -168,7 +168,11 @@ def hidiocsfeature(length: int) -> int:
 # report 0x05, then reads report 0x06, which returns the lighting settings block.
 READ_LIGHTING = bytes.fromhex("0583c6000000")
 LIGHTING_REPLY_PREFIX = bytes.fromhex("0683c6")
-ALLOWED_COMMANDS = frozenset({READ_LIGHTING})
+# Seen in a USB capture of the official software (2026-11-06, remapping Caps Lock): it sends this,
+# then reads report 0x06, which returns the key map (starts 06 84 d8).
+READ_KEYMAP = bytes.fromhex("0584d8000000")
+KEYMAP_REPLY_PREFIX = bytes.fromhex("0684d8")
+ALLOWED_COMMANDS = frozenset({READ_LIGHTING, READ_KEYMAP})
 BLOCK_BUFFER_LEN = 1032
 
 
@@ -259,9 +263,9 @@ def is_colour_table_write(buf: bytes) -> bool:
             and buf[FIXED_COLOUR.stop:] == t[FIXED_COLOUR.stop:])
 
 
-def _lighting_problem(data: bytes) -> str:
-    if not data.startswith(LIGHTING_REPLY_PREFIX):
-        return "The reply doesn't start with 06 83 c6, so it isn't the lighting block."
+def _block_problem(data: bytes, prefix: bytes = LIGHTING_REPLY_PREFIX, what: str = "lighting block") -> str:
+    if not data.startswith(prefix):
+        return f"The reply doesn't start with {prefix.hex(' ')}, so it isn't the {what}."
     if len(data) < 22:
         return f"Short reply: {len(data)} bytes."
     return ""
@@ -344,8 +348,14 @@ class Session:
             raise DeviceGone(self.devnode) from e
 
     def read_lighting(self) -> FeatureResult:
+        return self._read_block(READ_LIGHTING, LIGHTING_REPLY_PREFIX, "lighting block")
+
+    def read_keymap(self) -> FeatureResult:
+        return self._read_block(READ_KEYMAP, KEYMAP_REPLY_PREFIX, "key map")
+
+    def _read_block(self, command: bytes, prefix: bytes, what: str) -> FeatureResult:
         try:
-            _send_command(self.fd, READ_LIGHTING, self._ioctl)
+            _send_command(self.fd, command, self._ioctl)
             self._sleep(0.02)
             buf = bytearray(BLOCK_BUFFER_LEN)
             buf[0] = 0x06
@@ -355,7 +365,7 @@ class Session:
             return FeatureResult(0x06, BLOCK_BUFFER_LEN, b"", f"Read failed: {os.strerror(e.errno or 0)}.")
         n = n if isinstance(n, int) and n >= 0 else 0
         data = bytes(buf[:min(n, len(buf))])
-        return FeatureResult(0x06, BLOCK_BUFFER_LEN, data, _lighting_problem(data))
+        return FeatureResult(0x06, BLOCK_BUFFER_LEN, data, _block_problem(data, prefix, what))
 
     def write_lighting(self, payload: bytes) -> None:
         if not is_lighting_write(payload):
@@ -379,6 +389,23 @@ class Session:
 
     def pause(self, seconds: float) -> None:
         self._sleep(seconds)
+
+
+def read_keymap_block(devnode: str, **io) -> FeatureResult:
+    """Ask for the key map, exactly as the official software does. Read only."""
+    with Session(devnode, **io) as session:
+        return session.read_keymap()
+
+
+def keymap_entries(data: bytes) -> list[bytes]:
+    """The key map's 4-byte entries (type, two unknown bytes, USB key code), after an 8-byte header."""
+    return [data[i:i + 4] for i in range(8, len(data) - 3, 4)]
+
+
+def describe_keymap_diff(old: bytes, new: bytes) -> str:
+    a, b = keymap_entries(old), keymap_entries(new)
+    parts = [f"entry {i}: {x.hex(' ')} → {y.hex(' ')}" for i, (x, y) in enumerate(zip(a, b)) if x != y]
+    return ", ".join(parts)
 
 
 def read_lighting_block(devnode: str, **io) -> FeatureResult:

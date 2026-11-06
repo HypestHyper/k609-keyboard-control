@@ -115,12 +115,12 @@ def test_module_has_no_write_paths():
     assert "os.write" not in src
     # SET_FEATURE is used in exactly three places, each behind its own check.
     assert src.count("hidiocsfeature(len(") == 3
-    assert hidraw.ALLOWED_COMMANDS == {bytes.fromhex("0583c6000000")}
+    assert hidraw.ALLOWED_COMMANDS == {bytes.fromhex("0583c6000000"), bytes.fromhex("0584d8000000")}
 
 
 def test_send_command_rejects_anything_not_allowed():
     dev = FakeDevice()
-    for cmd in (bytes.fromhex("0503c6000000"), bytes.fromhex("0603c6"), b""):
+    for cmd in (bytes.fromhex("0503c6000000"), bytes.fromhex("0603c6"), bytes.fromhex("0504d8000000"), b""):
         with pytest.raises(ValueError):
             hidraw._send_command(1, cmd, dev.ioctl)
     assert dev.requests == []
@@ -194,3 +194,24 @@ def test_lighting_write_shape_is_enforced():
     with hidraw.Session("/dev/x", opener=dev.open, ioctl=dev.ioctl, closer=dev.close, sleep=lambda s: None) as sess:
         sess.write_lighting(good)
     assert dev.requests == [(hidraw.hidiocsfeature(1032), good)] and dev.closed
+
+
+
+def test_read_keymap_sends_captured_command():
+    reply = bytes.fromhex("0684d8008400000002000000") + bytes(1020)
+    dev = FakeKeyboard({6: reply})
+    res = hidraw.read_keymap_block("/dev/x", opener=dev.open, ioctl=dev.ioctl, closer=dev.close,
+                                   sleep=lambda s: None)
+    assert res.ok and dev.requests[0] == (0xC0064806, bytes.fromhex("0584d8000000"))
+    bad = FakeDevice()
+    res = hidraw.read_keymap_block("/dev/x", opener=dev.open,
+                                   ioctl=FakeKeyboard({6: BLOCK}).ioctl, closer=dev.close, sleep=lambda s: None)
+    assert not res.ok and "key map" in res.problem
+
+
+def test_describe_keymap_diff():
+    a = bytearray(bytes.fromhex("0684d80084000000") + bytes(1024))
+    a[8 + 4 * 143 + 3] = 0x39
+    b = bytearray(a); b[8 + 4 * 143 + 3] = 0x29
+    assert hidraw.describe_keymap_diff(bytes(a), bytes(b)) == "entry 143: 00 00 00 39 → 00 00 00 29"
+    assert hidraw.describe_keymap_diff(bytes(a), bytes(a)) == ""
