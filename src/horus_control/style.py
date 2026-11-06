@@ -129,6 +129,8 @@ window.horus button.keycap:disabled { opacity: 0.45; }
 window.horus button.keycap.remapped { background-color: @PRIMARY_CONTAINER; color: @ON_PRIMARY_CONTAINER; }
 window.horus button.keycap.remapped:hover { background-color: @PRIMARY_CONTAINER; }
 window.horus button.keycap.selected { outline: 2px solid @PRIMARY; outline-offset: 1px; }
+window.horus.chooser { background-color: transparent; }
+window.horus button.chooser-key { min-height: px(34)px; padding: 0 px(6)px; }
 .keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
 
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }

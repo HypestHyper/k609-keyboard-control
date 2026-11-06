@@ -154,6 +154,89 @@ class KeyboardView(Gtk.Widget):
 
 
 
+class KeyChooser(Gtk.Window):
+    """Pick a key by clicking it on the keyboard layout, or one of the keys that aren't on the board.
+
+    on_pick(kind, value): kind "code" (a USB key code) or "macro" (index into macros).
+    """
+
+    def __init__(self, parent, title, current, on_pick, macro_names=None, current_macro=None):
+        super().__init__(transient_for=parent, modal=True, decorated=False, title=title)
+        self.add_css_class("horus")
+        self.add_css_class("chooser")
+        self.set_default_size(800, -1)
+        self.on_pick = on_pick
+        root = vbox(14, "card")
+        root.set_margin_start(4)
+        root.set_margin_end(4)
+        root.set_margin_top(4)
+        root.set_margin_bottom(4)
+        self.set_child(root)
+        root.append(label(title, "title"))
+        root.append(label("Click a key. Escape cancels.", "small", "dim"))
+
+        defaults = {k.number: k for k in keymap.KEYS}
+        buttons = []
+        for number, rect in keymap.LAYOUT.items():
+            k = defaults.get(number)
+            name = k.name if k else keymap.SPECIAL[number]
+            btn = Gtk.Button()
+            btn.add_css_class("keycap")
+            btn.set_child(label(keymap.CAP_LABELS.get(name, name) if k else name, xalign=0.5, wrap=False))
+            if k is None:
+                btn.set_sensitive(False)
+            else:
+                code = k.default
+                btn.set_tooltip_text(keymap.TARGETS.get(code, name))
+                set_accessible_label(btn, keymap.TARGETS.get(code, name))
+                if code == current and current_macro is None:
+                    btn.add_css_class("selected")
+                btn.connect("clicked", lambda *_, c=code: self._pick("code", c))
+            buttons.append((btn, rect))
+        self.view = KeyboardView()
+        self.view.set_keys(buttons)
+        root.append(self.view)
+
+        on_board = {k.default for k in keymap.KEYS}
+        extras = [c for c in keymap.TARGETS if c not in on_board]
+        root.append(label("Keys not on this keyboard", "heading"))
+        root.append(self._button_grid([(keymap.SHORT_TARGETS.get(keymap.TARGETS[c], keymap.TARGETS[c]),
+                                        keymap.TARGETS[c], ("code", c), c == current and current_macro is None)
+                                       for c in extras]))
+        if macro_names:
+            root.append(label("Macros", "heading"))
+            root.append(self._button_grid([(n, f"Macro “{n}”", ("macro", i), i == current_macro)
+                                           for i, n in enumerate(macro_names)]))
+        cancel = Gtk.Button(label="Cancel")
+        cancel.add_css_class("text")
+        cancel.set_halign(Gtk.Align.END)
+        cancel.connect("clicked", lambda *_: self.close())
+        root.append(cancel)
+
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", lambda _c, kv, _k, _s: (self.close(), True)[1] if kv == Gdk.KEY_Escape else False)
+        self.add_controller(keys)
+        self.connect("close-request", lambda *_: (self.view.set_keys([]), False)[1])
+
+    def _button_grid(self, items) -> Gtk.Widget:
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=12,
+                           min_children_per_line=4, column_spacing=6, row_spacing=6, homogeneous=True)
+        for text, tip, pick, selected in items:
+            b = Gtk.Button(label=text, tooltip_text=tip)
+            b.add_css_class("keycap")
+            b.add_css_class("chooser-key")
+            set_accessible_label(b, tip)
+            if selected:
+                b.add_css_class("selected")
+            b.connect("clicked", lambda *_, p=pick: self._pick(*p))
+            flow.append(b)
+        return flow
+
+    def _pick(self, kind, value):
+        self.close()
+        self.on_pick(kind, value)
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app: "App"):
         super().__init__(application=app, title="Horus Control")
@@ -832,34 +915,28 @@ class Window(Gtk.ApplicationWindow):
         box.append(label(key.name, "heading"))
         row = hbox(10)
         row.append(label("Sends", "dim", wrap=False))
-        names = [keymap.TARGETS[c] for c in codes] + [f"Macro: {m.name}" for m in self.macro_list]
-        dd = Gtk.DropDown.new_from_strings(names)
-        selected = 0
-        if cur[key.name] in codes:
-            selected = codes.index(cur[key.name])
-        else:
-            playing = [i for i, m in enumerate(self.macro_list) if m.key == key.name]
-            if playing:
-                selected = len(codes) + playing[0]
-        dd.set_selected(selected)
-        set_accessible_label(dd, f"What {key.name} sends")
-        row.append(dd)
-        apply_btn = Gtk.Button(label="Remap")
-        apply_btn.add_css_class("filled")
+        playing = [i for i, m in enumerate(self.macro_list) if m.key == key.name]
+        current_macro = playing[0] if cur[key.name] >= keymap.MACRO_CODE and playing else None
+        shown = (f"Macro “{self.macro_list[current_macro].name}”" if current_macro is not None
+                 else self._code_name(cur[key.name]))
+        choose = Gtk.Button(label=f"{shown}  ▾")
+        choose.set_tooltip_text("Choose what this key sends")
+        set_accessible_label(choose, f"{key.name} sends {shown}. Choose another key")
+        choose.set_sensitive(not self.keys_busy)
 
-        def do_remap(*_):
-            i = dd.get_selected()
-            if i >= len(codes):
-                self._assign_macro_to_key(iface, i - len(codes), key.name)
+        def picked(kind, value):
+            if kind == "macro":
+                self._assign_macro_to_key(iface, value, key.name)
                 return
-            code = codes[i]
-            if cur.get(key.name) == code:
+            if cur.get(key.name) == value:
                 return
             self._unassign_macro(key.name)
-            self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: code}, handle=self.handle),
-                           lambda now: f"{key.name} now sends {keymap.TARGETS[code]}.")
-        apply_btn.connect("clicked", do_remap)
-        row.append(apply_btn)
+            self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: value}, handle=self.handle),
+                           lambda now: f"{key.name} now sends {keymap.TARGETS[value]}.")
+        choose.connect("clicked", lambda *_: KeyChooser(
+            self, f"What should {key.name} send?", cur[key.name], picked,
+            [m.name for m in self.macro_list], current_macro).present())
+        row.append(choose)
         if cur[key.name] != key.default:
             undo = Gtk.Button(label=f"Reset {key.name}")
             undo.add_css_class("text")
@@ -867,8 +944,6 @@ class Window(Gtk.ApplicationWindow):
                 lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
                 lambda now: f"Reset {key.name}.")))
             row.append(undo)
-        for w in (dd, apply_btn):
-            w.set_sensitive(not self.keys_busy)
         box.append(row)
         box.append(label("Click a key to change it. Fn is locked, because it switches the keyboard's "
                          "Fn layer. The macro, media and volume controls aren't part "
@@ -1026,10 +1101,12 @@ class Window(Gtk.ApplicationWindow):
             set_accessible_label(act, f"Step {i + 1} action")
             act.connect("notify::selected", lambda d, _p, st=st: setattr(st, "down", d.get_selected() == 0))
             row.append(act)
-            key = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
-            key.set_selected(codes.index(st.key) if st.key in codes else 0)
-            set_accessible_label(key, f"Step {i + 1} key")
-            key.connect("notify::selected", lambda d, _p, i=i: self._set_step_key(m, i, codes[d.get_selected()]))
+            key = Gtk.Button(label=f"{keymap.TARGETS.get(st.key, '?')}  ▾")
+            key.set_tooltip_text("Choose the key")
+            set_accessible_label(key, f"Step {i + 1} key: {keymap.TARGETS.get(st.key, '?')}. Choose another key")
+            key.connect("clicked", lambda *_, i=i, st=st: KeyChooser(
+                self, f"Step {i + 1}: which key?", st.key,
+                lambda kind, code, i=i: (self._set_step_key(m, i, code), self.render())).present())
             row.append(key)
             row.append(label("then wait", "dim", wrap=False))
             spin = Gtk.SpinButton.new_with_range(0, macros.LONG_MAX, 10)
