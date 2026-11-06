@@ -688,7 +688,7 @@ class Window(Gtk.ApplicationWindow):
             btn.set_halign(Gtk.Align.START)
             btn.set_sensitive(not self.light_busy)
             btn.connect("clicked", lambda *_: self._light_run(
-                lambda: lighting.restore(iface.devnode, lighting.backup_path()),
+                lambda: lighting.restore(iface.devnode, lighting.backup_path(), self._known_colour()),
                 lambda st: f"Restored {st.name}."))
             rc.append(btn)
         else:
@@ -756,8 +756,16 @@ class Window(Gtk.ApplicationWindow):
         cur = self.light_state[1] if self.light_state else None
         if cur and all(getattr(cur, k) == v for k, v in change.items()):
             return
-        self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(), **change),
+        colour = self._known_colour()
+        self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(),
+                                               colour=colour, **change),
                         lambda st: message)
+
+    def _known_colour(self):
+        """The Fixed on colour last sent from here, so saves can include it as the official
+        software does. None if Horus Control has never set one: the table isn't sent then."""
+        fc = self.app.settings.fixed_colour
+        return tuple(bytes.fromhex(fc)) if fc else None
 
     def _light_run(self, job, describe):
         kb = self.current()

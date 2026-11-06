@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: v0.5.** It finds the keyboard, picks its configuration interface
+**Status: v0.5.1.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.5.0-x86_64.AppImage
+./dist/Horus_Control-0.5.1-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -86,6 +86,11 @@ before saving. Horus Control does the same: it sends the table as recorded from 
 (`src/horus_control/colour_table.hex`, identical across 16 recorded saves apart from those 3 bytes)
 with your colour, then saves the lighting block unchanged. Other effects' colours in that table are
 not decoded, so they're always sent as recorded. Restore can't undo a colour.
+
+Every save copies the official software's sequence and timing: read command, 20 ms, read,
+20 ms, colour table, 50 ms, lighting block, 40 ms, and the whole save twice. The colour table is
+included with the last colour Horus Control set; if it has never set one, the table is left out.
+The keyboard's transition animation depends on this sequence.
 
 Decoded layout of the lighting block (byte offsets include the 3-byte header):
 

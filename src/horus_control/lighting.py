@@ -148,31 +148,62 @@ def read_state(devnode: str, **io) -> State:
         return parse(_read(s))
 
 
-def apply(devnode: str, *, backup: str | None = None, **change) -> State:
-    """Read, change only the requested known fields, save, then read back and check."""
-    capabilities.require_usable("lighting")
-    io = {k: change.pop(k) for k in ("opener", "ioctl", "closer", "sleep") if k in change}
+# Timing of one save, copied from the official software (USB recording, 2026-11-06):
+# read command, 20 ms, read; 20 ms, colour table; 50 ms, lighting block; 40 ms.
+# The software always does the whole save twice, and so do we: the keyboard's transition
+# animation (fade or expand from the centre) depends on it.
+GAP_BEFORE_TABLE = 0.02
+GAP_BEFORE_BLOCK = 0.05
+GAP_AFTER_BLOCK = 0.04
+
+
+def _save_round(s: Session, payload: bytes, table: bytes | None) -> None:
+    s.pause(GAP_BEFORE_TABLE)
+    if table is not None:
+        s.write_colour_table(table)
+        s.pause(GAP_BEFORE_BLOCK)
+    s.write_lighting(payload)
+    s.pause(GAP_AFTER_BLOCK)
+
+
+def _change(devnode: str, *, backup: str | None, colour, change: dict, io: dict) -> State:
+    table = build_colour_table(colour) if colour is not None else None
     with Session(devnode, **io) as s:
         block = _read(s)
         before = parse(block)
         if backup and not os.path.exists(backup):
             save_backup(before, backup)
         payload = build_write(block, **change)
-        if payload[:BLOCK_LEN][3:] == block[3:BLOCK_LEN]:
+        if table is None and payload[3:BLOCK_LEN] == block[3:BLOCK_LEN]:
             return before
-        s.write_lighting(payload)
-        after = _read(s)
-    if _known_fields(after) != _known_fields(payload):
-        raise VerifyFailed("The keyboard didn't keep the change.")
+        _save_round(s, payload, table)
+        after = _read(s)                      # the official software's second round starts with this read
+        if _known_fields(after) != _known_fields(payload):
+            raise VerifyFailed("The keyboard didn't keep the change.")
+        _save_round(s, build_write(after), table)
     return parse(after)
 
 
-def restore(devnode: str, backup: str, **io) -> State:
+def apply(devnode: str, *, backup: str | None = None, colour: tuple[int, int, int] | None = None,
+          **change) -> State:
+    """Read, change only the requested known fields, then save twice as the official software does.
+
+    colour: the Fixed on colour to send in the colour table, as the official software does on
+    every save. Leave it out when unknown, and the table isn't sent.
+    """
+    capabilities.require_usable("lighting")
+    if colour is not None:
+        capabilities.require_usable("lighting_colour")
+    io = {k: change.pop(k) for k in ("opener", "ioctl", "closer", "sleep") if k in change}
+    return _change(devnode, backup=backup, colour=colour, change=change, io=io)
+
+
+def restore(devnode: str, backup: str, colour: tuple[int, int, int] | None = None, **io) -> State:
     saved = load_backup(backup)
     if saved is None:
         raise FileNotFoundError(backup)
     _, effect, levels = saved
-    return apply(devnode, effect=effect, levels=levels, **io)
+    return apply(devnode, effect=effect, levels=levels, colour=colour, **io)
 
 
 def parse_hex_colour(text: str) -> tuple[int, int, int]:
@@ -195,16 +226,8 @@ def build_colour_table(rgb: tuple[int, int, int]) -> bytes:
 
 
 def set_fixed_colour(devnode: str, rgb: tuple[int, int, int], **io) -> State:
-    """Send the colour table with a new Fixed on colour, then save the lighting block unchanged,
-    in the same order as the official software. The colour itself can't be read back."""
+    """Send the colour table with a new Fixed on colour and save the lighting block unchanged,
+    exactly as the official software does. The colour itself can't be read back."""
+    capabilities.require_usable("lighting")
     capabilities.require_usable("lighting_colour")
-    table = build_colour_table(rgb)
-    with Session(devnode, **io) as s:
-        block = _read(s)
-        parse(block)
-        s.write_colour_table(table)
-        s.write_lighting(build_write(block))
-        after = _read(s)
-    if _known_fields(after) != _known_fields(block):
-        raise VerifyFailed("The lighting settings changed unexpectedly while sending the colour.")
-    return parse(after)
+    return _change(devnode, backup=None, colour=rgb, change={}, io=io)

@@ -309,7 +309,6 @@ class Session:
         except OSError as e:
             self._gone(e)
             raise WriteFailed(os.strerror(e.errno or 0)) from e
-        self._sleep(0.1)
 
     def write_colour_table(self, payload: bytes) -> None:
         if not is_colour_table_write(payload):
@@ -320,7 +319,9 @@ class Session:
         except OSError as e:
             self._gone(e)
             raise WriteFailed(os.strerror(e.errno or 0)) from e
-        self._sleep(0.15)
+
+    def pause(self, seconds: float) -> None:
+        self._sleep(seconds)
 
 
 def read_lighting_block(devnode: str, **io) -> FeatureResult:

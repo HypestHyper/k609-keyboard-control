@@ -106,7 +106,7 @@ def test_apply_writes_verifies_and_backs_up(tmp_path):
     kb = FakeKeyboard(block(0x01))
     path = str(tmp_path / "lighting-backup.json")
     st = lighting.apply("/dev/x", backup=path, effect=0x0B, **kb.io())
-    assert st.name == "Neon stream" and len(kb.writes) == 1
+    assert st.name == "Neon stream" and len(kb.writes) == 2
     saved = json.loads(open(path).read())
     assert saved["effect"] == 0x01 and saved["levels"]["01"] == 0x44
     st = lighting.apply("/dev/x", backup=path, brightness=1, speed=3, **kb.io())
@@ -182,7 +182,25 @@ def test_set_fixed_colour_follows_official_sequence():
     kb = ColourKeyboard(block(0x01))
     st = lighting.set_fixed_colour("/dev/x", (255, 0, 0), **kb.io())
     assert st.name == "Fixed on"
-    # read command, read, colour table, block save, read command, read back
-    assert kb.sequence == ["0583c6", "060000", "0608c8", "0603c6", "0583c6", "060000"]
-    assert kb.writes[0][29:32] == b"\xff\x00\x00"
-    assert kb.writes[1][3:262] == block(0x01)[3:262]
+    # Two identical rounds, as the official software does: read command, read, table, block.
+    one = ["0583c6", "060000", "0608c8", "0603c6"]
+    assert kb.sequence == one + one
+    assert kb.writes[0][29:32] == b"\xff\x00\x00" and kb.writes[2] == kb.writes[0]
+    assert kb.writes[1][3:262] == block(0x01)[3:262] and kb.writes[3] == kb.writes[1]
+
+
+def test_save_timing_matches_official_software():
+    kb = ColourKeyboard(block(0x01))
+    pauses = []
+    io = kb.io()
+    io["sleep"] = pauses.append
+    lighting.apply("/dev/x", effect=0x03, colour=(1, 2, 3), **io)
+    assert pauses == [0.02, 0.02, 0.05, 0.04] * 2
+    assert kb.sequence == ["0583c6", "060000", "0608c8", "0603c6"] * 2
+    assert kb.writes[0][29:32] == bytes([1, 2, 3])
+
+
+def test_effect_change_without_known_colour_skips_table():
+    kb = ColourKeyboard(block(0x01))
+    lighting.apply("/dev/x", effect=0x03, **kb.io())
+    assert kb.sequence == ["0583c6", "060000", "0603c6"] * 2
