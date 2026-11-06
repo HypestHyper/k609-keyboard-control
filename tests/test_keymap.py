@@ -109,3 +109,9 @@ def test_remap_not_kept():
 
 def test_read_header_from_keyboard():
     assert DEFAULT[:8] == keymap.READ_HEADER
+
+
+def test_layout_covers_every_key():
+    assert set(keymap.LAYOUT) == {k.number for k in keymap.KEYS} | set(keymap.SPECIAL)
+    for x1, y1, x2, y2 in keymap.LAYOUT.values():
+        assert 16 <= x1 < x2 <= 606 and 54 <= y1 < y2 <= 232

@@ -110,6 +110,50 @@ class Clamp(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+class KeyboardView(Gtk.Widget):
+    """Places key buttons at their real positions (official layout), scaled to the width."""
+
+    X0, Y0, W, H = 16, 54, 599, 187
+
+    def __init__(self):
+        super().__init__(hexpand=True)
+        self.keys = []
+
+    def set_keys(self, keys):  # keys: list of (button, (x1, y1, x2, y2))
+        for button, _ in self.keys:
+            button.unparent()
+        self.keys = keys
+        for button, _ in keys:
+            button.set_parent(self)
+        self.queue_resize()
+
+    def do_get_request_mode(self):
+        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def do_measure(self, orientation, for_size):
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            return 470, 740, -1, -1
+        width = for_size if for_size > 0 else 740
+        h = round(self.H * width / self.W)
+        return h, h, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        scale = width / self.W
+        gap = max(1, round(3 * scale))
+        for button, (x1, y1, x2, y2) in self.keys:
+            # Cfg.ini draws small keys with wide gaps; grow each key towards its neighbours.
+            x2, y2 = min(x2 + 9, self.X0 + self.W), min(y2 + 9, self.Y0 + self.H)
+            button.measure(Gtk.Orientation.HORIZONTAL, -1)
+            button.measure(Gtk.Orientation.VERTICAL, -1)
+            r = Gdk.Rectangle()
+            r.x = round((x1 - self.X0) * scale)
+            r.y = round((y1 - self.Y0) * scale)
+            r.width = max(1, round((x2 - self.X0) * scale) - r.x - gap)
+            r.height = max(1, round((y2 - self.Y0) * scale) - r.y - gap)
+            button.size_allocate(r, -1)
+
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app: "App"):
         super().__init__(application=app, title="Horus Control")
@@ -188,6 +232,7 @@ class Window(Gtk.ApplicationWindow):
         self.keys_busy = False
         self.keys_message = ("", "dim")
         self.keys_selected = keymap.REMAPPABLE[0].name
+        self.keyboard_view = KeyboardView()     # kept for the window's life; its keys are replaced
         self.light_state = None                 # (devnode, lighting.State) once loaded
         self.handle = Handle()                  # kept open between operations, like the official software
         self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
@@ -673,67 +718,9 @@ class Window(Gtk.ApplicationWindow):
                 lambda: keymap.read(iface.devnode, handle=self.handle), lambda cur: ""))
             card.append(load)
         else:
-            cur = self.keys_state[1]
-            names = [k.name for k in keymap.REMAPPABLE]
-            codes = list(keymap.TARGETS)
-            card.append(label("Remap a key", "heading"))
-            row = hbox(10)
-            key_dd = Gtk.DropDown.new_from_strings(names)
-            key_dd.set_selected(names.index(self.keys_selected))
-            set_accessible_label(key_dd, "Key to remap")
-            row.append(key_dd)
-            row.append(label("sends", "dim", wrap=False))
-            target_dd = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
-            target_dd.set_selected(codes.index(cur[self.keys_selected]) if cur[self.keys_selected] in codes else 0)
-            set_accessible_label(target_dd, "What the key sends")
-            row.append(target_dd)
-            apply_btn = Gtk.Button(label="Remap")
-            apply_btn.add_css_class("filled")
-            row.append(apply_btn)
-            for w in (key_dd, target_dd, apply_btn):
-                w.set_sensitive(not self.keys_busy)
-
-            def key_changed(dd, _p):
-                self.keys_selected = names[dd.get_selected()]
-                c = cur[self.keys_selected]
-                target_dd.set_selected(codes.index(c) if c in codes else 0)
-            key_dd.connect("notify::selected", key_changed)
-
-            def do_remap(*_):
-                name = names[key_dd.get_selected()]
-                code = codes[target_dd.get_selected()]
-                self.keys_selected = name
-                if cur.get(name) == code:
-                    return
-                self._keys_run(lambda: keymap.remap(iface.devnode, {name: code}, handle=self.handle),
-                               lambda now: f"{name} now sends {keymap.TARGETS[code]}.")
-            apply_btn.connect("clicked", do_remap)
-            card.append(row)
-            card.append(label("Modifiers (Shift, Ctrl, Alt, Super), Fn and media keys can't be remapped yet.",
-                              "small", "faint"))
-
+            card.append(self._keyboard_view())
             card.append(Gtk.Box(css_classes=["divider"]))
-            card.append(label("Remapped keys", "heading"))
-            changed = [k for k in keymap.REMAPPABLE if cur[k.name] != k.default]
-            if not changed:
-                card.append(label("No keys are remapped.", "small", "dim"))
-            for k in changed:
-                r = hbox(10)
-                sends = keymap.TARGETS.get(cur[k.name], f"code 0x{cur[k.name]:02x}")
-                text = label(f"{k.name}  →  {sends}")
-                text.set_hexpand(True)
-                text.set_valign(Gtk.Align.CENTER)
-                r.append(text)
-                undo = Gtk.Button(label="Reset")
-                undo.add_css_class("text")
-                undo.set_tooltip_text(f"Makes {k.name} type {k.name} again")
-                set_accessible_label(undo, f"Reset {k.name}")
-                undo.set_sensitive(not self.keys_busy)
-                undo.connect("clicked", lambda *_, key=k: self._keys_run(
-                    lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
-                    lambda now, key=key: f"Reset {key.name}."))
-                r.append(undo)
-                card.append(r)
+            card.append(self._key_picker(iface))
 
         text, kind = self.keys_message
         if text:
@@ -752,6 +739,112 @@ class Window(Gtk.ApplicationWindow):
                 lambda now: "All keys are back to default."))
             rc.append(btn)
             page.append(rc)
+
+    def _keyboard_view(self) -> Gtk.Widget:
+        cur = self.keys_state[1]
+        by_number = {k.number: k for k in keymap.KEYS}
+        buttons = []
+        for number, rect in keymap.LAYOUT.items():
+            k = by_number.get(number)
+            name = k.name if k else keymap.SPECIAL[number]
+            cap = keymap.CAP_LABELS.get(name, name) if k else name
+            btn = Gtk.Button()
+            btn.add_css_class("keycap")
+            inner = vbox(0)
+            inner.set_valign(Gtk.Align.CENTER)
+            inner.append(label(cap, xalign=0.5, wrap=False))
+            remapped = k is not None and k.remappable and cur[k.name] != k.default
+            if remapped:
+                target = keymap.TARGETS.get(cur[k.name], f"0x{cur[k.name]:02x}")
+                inner.append(label("→ " + keymap.SHORT_TARGETS.get(target, target), "keycap-sub",
+                                   xalign=0.5, wrap=False))
+                btn.add_css_class("remapped")
+            btn.set_child(inner)
+            if k is None or not k.remappable:
+                btn.set_sensitive(False)
+                btn.set_tooltip_text(f"{name} can't be remapped yet")
+            else:
+                tip = f"{name}: sends {keymap.TARGETS.get(cur[name], hex(cur[name]))}"
+                btn.set_tooltip_text(tip)
+                set_accessible_label(btn, tip)
+                if name == self.keys_selected:
+                    btn.add_css_class("selected")
+                btn.set_sensitive(not self.keys_busy)
+                btn.connect("clicked", lambda *_, n=name: self._select_key(n))
+            buttons.append((btn, rect))
+        if (parent := self.keyboard_view.get_parent()) is not None:
+            parent.remove(self.keyboard_view)
+        self.keyboard_view.set_keys(buttons)
+        return self.keyboard_view
+
+    def _select_key(self, name):
+        self.keys_selected = name
+        self.keys_message = ("", "dim")
+        GLib.idle_add(lambda: (self.render(), False)[1])
+
+    def _key_picker(self, iface) -> Gtk.Widget:
+        cur = self.keys_state[1]
+        key = next(k for k in keymap.REMAPPABLE if k.name == self.keys_selected)
+        codes = list(keymap.TARGETS)
+        box = vbox(10)
+        box.append(label(key.name, "heading"))
+        row = hbox(10)
+        row.append(label("Sends", "dim", wrap=False))
+        dd = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
+        dd.set_selected(codes.index(cur[key.name]) if cur[key.name] in codes else 0)
+        set_accessible_label(dd, f"What {key.name} sends")
+        row.append(dd)
+        apply_btn = Gtk.Button(label="Remap")
+        apply_btn.add_css_class("filled")
+
+        def do_remap(*_):
+            code = codes[dd.get_selected()]
+            if cur.get(key.name) == code:
+                return
+            self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: code}, handle=self.handle),
+                           lambda now: f"{key.name} now sends {keymap.TARGETS[code]}.")
+        apply_btn.connect("clicked", do_remap)
+        row.append(apply_btn)
+        if cur[key.name] != key.default:
+            undo = Gtk.Button(label=f"Reset {key.name}")
+            undo.add_css_class("text")
+            undo.connect("clicked", lambda *_: self._keys_run(
+                lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
+                lambda now: f"Reset {key.name}."))
+            row.append(undo)
+        for w in (dd, apply_btn):
+            w.set_sensitive(not self.keys_busy)
+        box.append(row)
+        box.append(label("Click a key to change it. Modifiers, Fn and the special Ctrl can't be remapped "
+                         "yet; the macro, media and volume controls aren't part of the key map.",
+                         "small", "dim"))
+
+        box.append(Gtk.Box(css_classes=["divider"]))
+        changed = [k for k in keymap.REMAPPABLE if cur[k.name] != k.default]
+        box.append(label(f"Remapped keys ({len(changed)})" if changed else "Remapped keys", "heading"))
+        if not changed:
+            box.append(label("None. Remapped keys are tinted on the keyboard above and listed here.",
+                             "small", "dim"))
+        for k in changed:
+            r = hbox(10)
+            sends = keymap.TARGETS.get(cur[k.name], f"code 0x{cur[k.name]:02x}")
+            name_btn = Gtk.Button(label=f"{k.name}  →  {sends}")
+            name_btn.add_css_class("text")
+            name_btn.set_hexpand(True)
+            name_btn.set_halign(Gtk.Align.START)
+            name_btn.set_tooltip_text(f"Select {k.name} on the keyboard")
+            name_btn.connect("clicked", lambda *_, n=k.name: self._select_key(n))
+            r.append(name_btn)
+            undo = Gtk.Button(label="Reset")
+            undo.add_css_class("text")
+            set_accessible_label(undo, f"Reset {k.name}")
+            undo.set_sensitive(not self.keys_busy)
+            undo.connect("clicked", lambda *_, key=k: self._keys_run(
+                lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
+                lambda now, key=key: f"Reset {key.name}."))
+            r.append(undo)
+            box.append(r)
+        return box
 
     def _keys_run(self, job, describe):
         kb = self.current()

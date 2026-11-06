@@ -121,6 +121,16 @@ window.horus button.swatch:active { border-radius: px(12)px; }
 window.horus button.swatch.current { border-radius: px(12)px; outline: 3px solid @PRIMARY; outline-offset: 2px; }
 .colour-entry { font-family: monospace; }
 
+window.horus button.keycap { min-height: 0; min-width: 0; padding: 0 px(2)px; border-radius: px(8)px; font-size: fpx(12)px;
+  background-color: @SURFACE_CONTAINER_HIGHEST; color: @ON_SURFACE; }
+window.horus button.keycap:hover { background-color: @SURFACE_BRIGHT; }
+window.horus button.keycap:active { border-radius: px(4)px; }
+window.horus button.keycap:disabled { opacity: 0.45; }
+window.horus button.keycap.remapped { background-color: @PRIMARY_CONTAINER; color: @ON_PRIMARY_CONTAINER; }
+window.horus button.keycap.remapped:hover { background-color: @PRIMARY_CONTAINER; }
+window.horus button.keycap.selected { outline: 2px solid @PRIMARY; outline-offset: 1px; }
+.keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
+
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }
 .tabbar button { background-color: transparent; color: @ON_SURFACE_VARIANT; }
 .tabbar button:hover { background-color: alpha(@ON_SURFACE, 0.08); }
