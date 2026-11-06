@@ -131,6 +131,12 @@ window.horus button.keycap.remapped:hover { background-color: @PRIMARY_CONTAINER
 window.horus button.keycap.selected { outline: 2px solid @PRIMARY; outline-offset: 1px; }
 window.horus.chooser { background-color: transparent; }
 window.horus button.chooser-key { min-height: px(34)px; padding: 0 px(6)px; }
+window.horus scale { padding: px(8)px 0; }
+window.horus scale trough { min-height: px(6)px; border-radius: 999px; border: none; background-color: @SURFACE_CONTAINER_HIGHEST; background-image: none; box-shadow: none; outline: none; }
+window.horus scale highlight { border-radius: 999px; background-color: @PRIMARY; background-image: none; border: none; }
+window.horus scale slider { min-width: px(18)px; min-height: px(18)px; margin: -px(6)px; border-radius: 999px; border: none; box-shadow: none; background-image: none; background-color: @PRIMARY; }
+window.horus scale:focus-visible slider { outline: 2px solid @PRIMARY; outline-offset: 2px; }
+window.horus scale value { color: @ON_SURFACE_VARIANT; font-feature-settings: "tnum"; min-width: px(28)px; }
 .keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
 
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }

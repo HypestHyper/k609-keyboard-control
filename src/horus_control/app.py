@@ -16,6 +16,7 @@ from . import __version__, capabilities, keymap, lighting, macros, settings as s
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
+from .colourpicker import ColourPicker  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -325,6 +326,7 @@ class Window(Gtk.ApplicationWindow):
         self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
         self.light_busy = False
         self.light_message = ("", "dim")
+        self.picker_rgb = None                  # colour shown in the Fixed on colour picker
         self.settings_page = self._page("settings")
         self._build_settings()
         self.tabs[0].set_active(True)
@@ -1322,29 +1324,19 @@ class Window(Gtk.ApplicationWindow):
                 b.add_css_class("current")
             set_accessible_label(b, f"Set Fixed on colour to {name.lower()}")
             b.set_sensitive(not self.light_busy)
-            b.connect("clicked", lambda *_, h=hexv, n=name: self._send_colour(iface, h, n.lower()))
+            b.connect("clicked", lambda *_, h=hexv, n=name: (setattr(self, "picker_rgb", tuple(bytes.fromhex(h))),
+                                                             self._send_colour(iface, h, n.lower())))
             swatches.append(b)
         box.append(swatches)
-        row = hbox(10)
-        entry = Gtk.Entry(placeholder_text="Hex, like ff8800", max_length=7, width_chars=12)
-        entry.add_css_class("colour-entry")
-        set_accessible_label(entry, "Fixed on colour as a hex code")
-        apply_btn = Gtk.Button(label="Apply colour")
-        apply_btn.set_sensitive(not self.light_busy)
-
-        def from_entry(*_):
-            try:
-                rgb = lighting.parse_hex_colour(entry.get_text())
-            except ValueError as e:
-                self.light_message = (str(e), "error-text")
-                self.render()
-                return
-            self._send_colour(iface, bytes(rgb).hex(), "#" + bytes(rgb).hex())
-        entry.connect("activate", from_entry)
-        apply_btn.connect("clicked", from_entry)
-        row.append(entry)
-        row.append(apply_btn)
-        box.append(row)
+        if self.picker_rgb is None:
+            self.picker_rgb = tuple(bytes.fromhex(last)) if last else (255, 255, 255)
+        picker = ColourPicker(self.picker_rgb,
+                              lambda rgb: self._send_colour(iface, bytes(rgb).hex(), "#" + bytes(rgb).hex()),
+                              on_change=lambda rgb: setattr(self, "picker_rgb", rgb))
+        picker.set_sensitive_apply(not self.light_busy)
+        box.append(picker)
+        box.append(label("Dragging only changes the preview; Apply colour sends it to the keyboard.",
+                         "small", "faint"))
         return box
 
     def _send_colour(self, iface, hexv, name):
