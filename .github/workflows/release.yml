@@ -9,7 +9,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: ["src/k609_control/__init__.py", ".github/workflows/release.yml", "tools/**", "packaging/**"]
+    paths: ["src/**", ".github/workflows/release.yml", "tools/**", "packaging/**"]
     tags: ["v*"]
   workflow_dispatch:
 

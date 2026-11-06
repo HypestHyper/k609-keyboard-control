@@ -1770,7 +1770,7 @@ class Window(Gtk.ApplicationWindow):
 
 class App(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)   # DEFAULT_FLAGS needs GLib 2.74
         self.settings = settings_mod.load()
         self.provider = Gtk.CssProvider()
         self.portal_dark = None
