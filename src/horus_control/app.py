@@ -800,6 +800,25 @@ class Window(Gtk.ApplicationWindow):
         if changed:
             macros.save(self.macro_list)
 
+    def _assign_macro_to_key(self, iface, index, key_name):
+        m = self.macro_list[index]
+        if m.key == key_name:
+            return
+        old = [(x, x.key) for x in self.macro_list]
+        for x in self.macro_list:
+            if x.key == key_name:
+                x.key = None
+        m.key = key_name
+        if len([x for x in self.macro_list if x.key]) > macros.SLOTS:
+            for x, k in old:
+                x.key = k
+            self.keys_message = (f"The keyboard holds up to {macros.SLOTS} assigned macros.", "error-text")
+            self.render()
+            return
+        macros.save(self.macro_list)
+        self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
+                       lambda now: f"{key_name} plays “{m.name}” now.")
+
     def _select_key(self, name):
         self.keys_selected = name
         self.keys_message = ("", "dim")
@@ -813,15 +832,27 @@ class Window(Gtk.ApplicationWindow):
         box.append(label(key.name, "heading"))
         row = hbox(10)
         row.append(label("Sends", "dim", wrap=False))
-        dd = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
-        dd.set_selected(codes.index(cur[key.name]) if cur[key.name] in codes else 0)
+        names = [keymap.TARGETS[c] for c in codes] + [f"Macro: {m.name}" for m in self.macro_list]
+        dd = Gtk.DropDown.new_from_strings(names)
+        selected = 0
+        if cur[key.name] in codes:
+            selected = codes.index(cur[key.name])
+        else:
+            playing = [i for i, m in enumerate(self.macro_list) if m.key == key.name]
+            if playing:
+                selected = len(codes) + playing[0]
+        dd.set_selected(selected)
         set_accessible_label(dd, f"What {key.name} sends")
         row.append(dd)
         apply_btn = Gtk.Button(label="Remap")
         apply_btn.add_css_class("filled")
 
         def do_remap(*_):
-            code = codes[dd.get_selected()]
+            i = dd.get_selected()
+            if i >= len(codes):
+                self._assign_macro_to_key(iface, i - len(codes), key.name)
+                return
+            code = codes[i]
             if cur.get(key.name) == code:
                 return
             self._unassign_macro(key.name)
