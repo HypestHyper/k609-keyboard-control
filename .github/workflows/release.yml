@@ -80,6 +80,7 @@ jobs:
       - name: Install a bare desktop (X server, GPU and font libraries)
         run: ${{ matrix.install }}
       - name: Start the app
+        shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           GDK_BACKEND: x11
@@ -89,8 +90,14 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 >/dev/null 2>&1 &
           sleep 3
           export DISPLAY=:99
-          ./*.AppImage --version
-          ./*.AppImage --smoke-test
+          # Report failures as annotations, which are visible without signing in to GitHub.
+          report() {
+            echo "::error title=$1::$(tail -c 3000 out.txt | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+          }
+          ./*.AppImage --version > out.txt 2>&1 || { cat out.txt; report "--version failed"; exit 1; }
+          cat out.txt
+          ./*.AppImage --smoke-test > out.txt 2>&1 || { cat out.txt; report "--smoke-test failed"; exit 1; }
+          cat out.txt
 
   release:
     needs: [build, test]
