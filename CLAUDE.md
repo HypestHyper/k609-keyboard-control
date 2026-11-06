@@ -2,7 +2,9 @@
 
 - Spec: the Horus Control handover brief. UI follows the GTK App Family design language. Neither file is in this repo; ask the user if you need them.
 - **Never add a HID write** (SET_FEATURE, output report, write()) until a K609GG protocol is
-  proven with evidence and the user has reviewed it. Gate new features through
+  proven with evidence and the user has reviewed it. The only exception so far is
+  `hidraw.ALLOWED_COMMANDS`: the captured read request `05 83 c6 00 00 00`, approved by the user.
+  Anything added to that list needs the same capture evidence and user approval. Gate new features through
   `capabilities.require_usable()`; keep UI code away from raw bytes.
 - Never open interface 0 or read input reports (no keystrokes).
 - GTK 4 + PyGObject, no libadwaita. Styling lives only in `style.py`.

@@ -2,10 +2,11 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: read-only inspector (v0.1).** It finds the keyboard, picks its configuration
-interface (HID interface 1), shows the reports that interface declares, and on request reads
-feature reports `0x05` and `0x06` with `GET_FEATURE`. It **never writes** to the keyboard,
-never opens the typing interface (interface 0) and never reads keystrokes. Lighting, remapping,
+**Status: inspector (v0.2).** It finds the keyboard, picks its configuration interface
+(HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
+fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
+software sends. That is the only command the app can send, and it **changes no settings**. It never
+opens the typing interface (interface 0) and never reads keystrokes. Lighting, remapping,
 macros and the rest stay hidden until their protocol is proven on this keyboard.
 
 ## Run
@@ -22,17 +23,17 @@ From the source folder:
 PYTHONPATH=src python -m horus_control
 ```
 
-Without a window, to print what's found (`--read-features` adds the read-only GET_FEATURE):
+Without a window, to print what's found and the lighting block:
 
 ```bash
-PYTHONPATH=src python -m horus_control --inspect --read-features
+PYTHONPATH=src python -m horus_control --inspect --read-lighting
 ```
 
 ## AppImage
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.1.0-x86_64.AppImage
+./dist/Horus_Control-0.2.0-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -89,5 +90,10 @@ For development, `HORUS_CONTROL_SYSFS=/path/to/fake/sys` points the scan at a fa
 
 - Interface 1 declares feature report `0x05` (5 bytes) and `0x06` (1031 bytes), plus one
   report-ID byte each when read. There is no report `0x08`.
-- Every byte read is shown as opaque hex; nothing is interpreted yet.
+- Protocol, from a USB capture of the official software: send a 6-byte command on report
+  `0x05`, then read or write report `0x06`. `05 83 c6 …` then GET `0x06` returns the lighting
+  block (starts `06 83 c6`). `06 03 c6 …` writes it back. `05 84 d8 …` / `06 04 d8 …` read and
+  write a key-map block. `06 08 c8 …` and `06 09 cc/d0 …` are unknown tables.
+- In the lighting block, byte 21 changes with the effect (seen values `01`, `0e`, `07`, `15`)
+  and byte 20 changed once (`00` to `01`). Nothing else is decoded.
 - The 2.4 GHz receiver (`25a7:fa70`) and Bluetooth are out of scope.

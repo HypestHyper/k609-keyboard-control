@@ -1,7 +1,9 @@
-"""Read-only access to Linux hidraw: report-descriptor parsing and GET_FEATURE.
+"""Linux hidraw access: report-descriptor parsing, GET_FEATURE and one read command.
 
-No function in this module writes to a device. There is deliberately no
-SET_FEATURE, output-report or write() call anywhere in Horus Control.
+The only SET_FEATURE this module can send is a command from ALLOWED_COMMANDS:
+byte-for-byte copies of read requests captured from the official Redragon
+software. Nothing here can change a keyboard setting, and there is no
+output-report or write() call anywhere in Horus Control.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import time
 from dataclasses import dataclass
 
 # --- Report descriptor parsing -------------------------------------------------
@@ -151,6 +154,21 @@ def hidiocgfeature(length: int) -> int:
     return _ioc(3, ord("H"), 0x07, length)
 
 
+def hidiocsfeature(length: int) -> int:
+    """HIDIOCSFEATURE(len): _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len). Used only by _send_command."""
+    if not 0 < length < (1 << 14):
+        raise ValueError("feature buffer length out of range")
+    return _ioc(3, ord("H"), 0x06, length)
+
+
+# Seen in a USB capture of the official software (2026-11-06): it sends this on
+# report 0x05, then reads report 0x06, which returns the lighting settings block.
+READ_LIGHTING = bytes.fromhex("0583c6000000")
+LIGHTING_REPLY_PREFIX = bytes.fromhex("0683c6")
+ALLOWED_COMMANDS = frozenset({READ_LIGHTING})
+BLOCK_BUFFER_LEN = 1032
+
+
 class AccessDenied(Exception):
     pass
 
@@ -181,6 +199,52 @@ def check_reply(report_id: int, expected_len: int, data: bytes) -> str:
     return ""
 
 
+def _open(devnode, opener):
+    try:
+        return opener(devnode, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EPERM):
+            raise AccessDenied(devnode) from e
+        if e.errno in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
+            raise DeviceGone(devnode) from e
+        raise
+
+
+def _send_command(fd, command: bytes, ioctl) -> None:
+    if bytes(command) not in ALLOWED_COMMANDS:
+        raise ValueError("command is not on the allow-list")
+    buf = bytearray(command)
+    ioctl(fd, hidiocsfeature(len(buf)), buf, True)
+
+
+def read_lighting_block(devnode: str, *, opener=os.open, ioctl=fcntl.ioctl, closer=os.close,
+                        sleep=time.sleep) -> FeatureResult:
+    """Ask for the lighting settings block, exactly as the official software does."""
+    fd = _open(devnode, opener)
+    try:
+        try:
+            _send_command(fd, READ_LIGHTING, ioctl)
+            sleep(0.02)
+            buf = bytearray(BLOCK_BUFFER_LEN)
+            buf[0] = 0x06
+            n = ioctl(fd, hidiocgfeature(len(buf)), buf, True)
+        except OSError as e:
+            if e.errno in (errno.ENODEV, errno.ENXIO, errno.ENOENT):
+                raise DeviceGone(devnode) from e
+            return FeatureResult(0x06, BLOCK_BUFFER_LEN, b"", f"Read failed: {os.strerror(e.errno or 0)}.")
+    finally:
+        closer(fd)
+    n = n if isinstance(n, int) and n >= 0 else 0
+    data = bytes(buf[:min(n, len(buf))])
+    if not data.startswith(LIGHTING_REPLY_PREFIX):
+        problem = "The reply doesn't start with 06 83 c6, so it isn't the lighting block."
+    elif len(data) < 22:
+        problem = f"Short reply: {len(data)} bytes."
+    else:
+        problem = ""
+    return FeatureResult(0x06, BLOCK_BUFFER_LEN, data, problem)
+
+
 def read_feature_reports(devnode: str, reports, *, opener=os.open, ioctl=fcntl.ioctl,
                          closer=os.close) -> list[FeatureResult]:
     """Ask the device for each feature report with GET_FEATURE.
@@ -188,14 +252,7 @@ def read_feature_reports(devnode: str, reports, *, opener=os.open, ioctl=fcntl.i
     The device node is opened only for the duration of the call and nothing is
     read from or written to its input/output stream, so no keystrokes are seen.
     """
-    try:
-        fd = opener(devnode, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError as e:
-        if e.errno in (errno.EACCES, errno.EPERM):
-            raise AccessDenied(devnode) from e
-        if e.errno in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
-            raise DeviceGone(devnode) from e
-        raise
+    fd = _open(devnode, opener)
     results = []
     try:
         for rep in reports:

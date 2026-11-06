@@ -14,7 +14,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__, capabilities, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
-from .hidraw import AccessDenied, DeviceGone, hexdump, read_feature_reports  # noqa: E402
+from .hidraw import AccessDenied, DeviceGone, hexdump, read_lighting_block  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -287,8 +287,8 @@ class Window(Gtk.ApplicationWindow):
             return
         if not iface.access:
             page.append(self._access_card(iface))
-        page.append(section("Reports", "What the configuration interface says it supports. "
-                                       "Reading them changes nothing on the keyboard."))
+        page.append(section("Lighting settings", "Reads the keyboard's lighting settings the same way "
+                                                 "Redragon's software does. Nothing is changed."))
         page.append(self._reports_card(iface))
         page.append(section("Features", "Controls appear here only after they are proven to work "
                                         "on this keyboard."))
@@ -363,25 +363,24 @@ class Window(Gtk.ApplicationWindow):
     def _access_card(self, iface) -> Gtk.Widget:
         card = vbox(10, "card")
         card.append(label("Your user can't open the configuration interface", "heading"))
-        card.append(label(f"{iface.devnode} is owned by root, so reports can't be read. You can allow "
+        card.append(label(f"{iface.devnode} is owned by root, so settings can't be read. You can allow "
                           "it yourself with a udev rule that covers only this keyboard's interface 1. "
                           "Horus Control doesn't change system files.", "small", "dim"))
-        cmds = (f"sudo install -m 644 70-horus-control.rules {RULE_PATH}\n"
+        quoted = " ".join(f"'{line}'" for line in UDEV_RULE.strip().splitlines())
+        cmds = (f"printf '%s\\n' {quoted} | sudo tee {RULE_PATH} > /dev/null\n"
                 "sudo udevadm control --reload\n"
-                "sudo udevadm trigger --subsystem-match=hidraw\n\n"
-                f"# To remove it later:\nsudo rm {RULE_PATH} && sudo udevadm control --reload")
+                "sudo udevadm trigger --subsystem-match=hidraw")
         inner = vbox(8, "inner")
-        inner.append(label("1. Save this as 70-horus-control.rules", "subheading", "small"))
-        inner.append(label(UDEV_RULE.strip(), "mono", selectable=True))
-        inner.append(Gtk.Box(css_classes=["divider"]))
-        inner.append(label("2. Install it, then unplug and reconnect the keyboard", "small"))
+        inner.append(label("Paste these into a terminal (works in fish and bash), then unplug and "
+                           "reconnect the keyboard:", "small"))
         inner.append(label(cmds, "mono", selectable=True))
+        inner.append(Gtk.Box(css_classes=["divider"]))
+        inner.append(label(f"To remove it later: sudo rm {RULE_PATH}", "mono", "dim", selectable=True))
         card.append(inner)
-        btns = hbox(8)
-        copy = Gtk.Button(label="Copy rule")
-        copy.connect("clicked", lambda *_: self._copy(UDEV_RULE, copy))
-        btns.append(copy)
-        card.append(btns)
+        copy = Gtk.Button(label="Copy commands")
+        copy.set_halign(Gtk.Align.START)
+        copy.connect("clicked", lambda *_: self._copy(cmds + "\n", copy))
+        card.append(copy)
         return card
 
     def _reports_card(self, iface) -> Gtk.Widget:
@@ -393,13 +392,12 @@ class Window(Gtk.ApplicationWindow):
             grid.attach(label(f"{rep.payload_len} byte{'' if rep.payload_len == 1 else 's'}", "mono", "dim", wrap=False), 1, r, 1, 1)
         card.append(grid)
 
-        feats = desc.feature_reports()
         row = hbox(12)
-        read = Gtk.Button(label="Reading…" if self.reading else "Read feature reports")
+        read = Gtk.Button(label="Reading…" if self.reading else "Read lighting settings")
         read.add_css_class("filled")
         read.set_sensitive(iface.access and not self.reading)
-        read.set_tooltip_text("Asks the keyboard for " + ", ".join(f"0x{r.report_id:02x}" for r in feats)
-                              + " with GET_FEATURE. Nothing is written.")
+        read.set_tooltip_text("Sends the same read request as Redragon's software, then reads the "
+                              "reply. Doesn't change any setting.")
         read.connect("clicked", lambda *_: self._read_features(iface))
         row.append(read)
         if self.feature_message:
@@ -414,8 +412,7 @@ class Window(Gtk.ApplicationWindow):
             for res in results:
                 inner = vbox(6, "inner")
                 head = hbox(8)
-                head.append(label(f"Feature 0x{res.report_id:02x} · {len(res.data)} of {res.expected_len} bytes",
-                                  "heading", wrap=False))
+                head.append(label(f"Lighting settings · {len(res.data)} bytes", "heading", wrap=False))
                 if res.ok:
                     head.append(chip("Read", "ok"))
                 else:
@@ -423,8 +420,14 @@ class Window(Gtk.ApplicationWindow):
                 inner.append(head)
                 if res.problem:
                     inner.append(label(res.problem, "small", "error-text"))
-                inner.append(label("Opaque bytes: their meaning is not known yet. The first byte is the report ID.",
-                                   "small", "faint"))
+                if res.ok:
+                    grid = Gtk.Grid(column_spacing=20, row_spacing=6)
+                    self._row(grid, 0, "Byte 21", f"0x{res.data[21]:02x}  ·  changes when the effect changes; "
+                              "effect names not known yet")
+                    self._row(grid, 1, "Byte 20", f"0x{res.data[20]:02x}  ·  meaning not known yet")
+                    inner.append(grid)
+                inner.append(label("Only bytes 20 and 21 have been seen to change. Everything else is "
+                                   "unexplained so far.", "small", "faint"))
                 if res.data:
                     exp = Gtk.Expander(label="Show bytes")
                     view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False)
@@ -471,11 +474,10 @@ class Window(Gtk.ApplicationWindow):
         self.feature_message = ""
         self.render()
         devnode = iface.devnode
-        reports = iface.descriptor.feature_reports()
 
         def work():
             try:
-                res, msg = read_feature_reports(devnode, reports), ""
+                res, msg = [read_lighting_block(devnode)], ""
             except AccessDenied:
                 res, msg = None, "Access denied. See the instructions above."
             except DeviceGone:
@@ -489,8 +491,7 @@ class Window(Gtk.ApplicationWindow):
         self.reading = False
         if results is not None:
             self.feature_results = (devnode, results)
-            ok = sum(r.ok for r in results)
-            message = f"Read {ok} of {len(results)} feature reports."
+            message = "Read the lighting settings." if results[0].ok else "The read didn't work."
         self.feature_message = message
         self.render()
         self.say(message)
@@ -508,7 +509,7 @@ class Window(Gtk.ApplicationWindow):
                          + " ".join(f"{b:02x}" for b in i.descriptor_bytes))
         if self.feature_results:
             for r in self.feature_results[1]:
-                lines.append(f"GET_FEATURE 0x{r.report_id:02x} via hidraw HIDIOCGFEATURE({r.expected_len}): "
+                lines.append(f"Lighting block (SET_FEATURE 05 83 c6 00 00 00, then GET_FEATURE 0x06): "
                              f"{len(r.data)} bytes {r.problem}".rstrip())
                 lines.append(hexdump(r.data))
         return "\n".join(lines) + "\n"

@@ -4,9 +4,9 @@ import os
 import sys
 
 
-def inspect(read: bool) -> int:
+def inspect(read: bool, lighting: bool = False) -> int:
     from .device import find_keyboards
-    from .hidraw import AccessDenied, DeviceGone, hexdump, read_feature_reports
+    from .hidraw import AccessDenied, DeviceGone, hexdump, read_feature_reports, read_lighting_block
 
     keyboards = find_keyboards(os.environ.get("HORUS_CONTROL_SYSFS", "/sys"))
     if not keyboards:
@@ -33,13 +33,22 @@ def inspect(read: bool) -> int:
                 print(f"  Access denied to {iface.devnode}. See README for the udev rule.")
             except DeviceGone:
                 print("  Keyboard disconnected during the read.")
+        if lighting and iface:
+            try:
+                res = read_lighting_block(iface.devnode)
+                print(f"  Lighting block: {len(res.data)} bytes {res.problem}".rstrip())
+                print("    " + hexdump(res.data[:262]).replace("\n", "\n    "))
+            except AccessDenied:
+                print(f"  Access denied to {iface.devnode}. See README for the udev rule.")
+            except DeviceGone:
+                print("  Keyboard disconnected during the read.")
     return 0
 
 
 def main() -> int:
     args = sys.argv[1:]
     if "--inspect" in args:
-        return inspect("--read-features" in args)
+        return inspect("--read-features" in args, "--read-lighting" in args)
     if "--version" in args:
         from . import __version__
         print(__version__)

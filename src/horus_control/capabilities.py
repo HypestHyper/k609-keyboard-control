@@ -23,7 +23,7 @@ class Capability:
 
 CAPABILITIES: tuple[Capability, ...] = (
     Capability("lighting", "Lighting", Status.UNKNOWN,
-               "Feature reports 0x05 and 0x06 exist; their meaning is not decoded."),
+               "Settings can be read. Byte 21 changes with the effect; nothing else is decoded yet."),
     Capability("remapping", "Key remapping", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("macros", "Macros", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("media_keys", "Media keys", Status.UNKNOWN, "No protocol evidence yet."),
