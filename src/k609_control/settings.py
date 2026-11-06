@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 SCHEMA_VERSION = 1
 THEMES = ("system", "light", "dark")
 SIZES = ("compact", "default", "large")
+RECENT_MAX = 6
+
+
+def remember(recent: list, hexv: str) -> list:
+    """Most recent first, no repeats, at most RECENT_MAX."""
+    return ([hexv] + [c for c in recent if c != hexv])[:RECENT_MAX]
 
 
 def config_dir() -> str:
@@ -32,6 +38,7 @@ class Settings:
     fixed_colour: str = ""            # last Fixed on colour sent, "rrggbb"; the keyboard can't report it
     desktop_entry: bool = True        # keep a launcher entry for the AppImage in ~/.local/share
     accent: str = "4d7cff"            # UI accent seed, "rrggbb"
+    recent_colours: list = field(default_factory=list)   # last colours used in the colour pickers, "rrggbb"
 
     @classmethod
     def from_dict(cls, data) -> "Settings":
@@ -44,6 +51,10 @@ class Settings:
             s.size = data["size"]
         if isinstance(data.get("reduce_motion"), bool):
             s.reduce_motion = data["reduce_motion"]
+        rc = data.get("recent_colours")
+        if isinstance(rc, list):
+            s.recent_colours = [c for c in rc if isinstance(c, str) and len(c) == 6
+                                and all(x in "0123456789abcdef" for x in c)][:RECENT_MAX]
         ac = data.get("accent")
         if isinstance(ac, str) and len(ac) == 6 and all(c in "0123456789abcdef" for c in ac):
             s.accent = ac

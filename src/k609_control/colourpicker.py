@@ -167,7 +167,7 @@ class HueSquare(Gtk.Widget):
 class ColourPicker(Gtk.Box):
     """Wheel + square, R/G/B sliders, hex field and a preview. Calls on_apply(rgb) on Apply."""
 
-    def __init__(self, rgb, on_apply, apply_label="Apply colour", on_change=None):
+    def __init__(self, rgb, on_apply, apply_label="Apply colour", on_change=None, recent=()):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
         self.on_apply = on_apply
         self.on_change = on_change
@@ -209,6 +209,22 @@ class ColourPicker(Gtk.Box):
         self.preview.set_valign(Gtk.Align.CENTER)
         row.append(self.preview)
         right.append(row)
+
+        if recent:
+            row = Gtk.Box(spacing=8)
+            lbl = Gtk.Label(label="Recent", xalign=0, width_chars=6)
+            lbl.add_css_class("dim")
+            row.append(lbl)
+            for colour in list(recent)[:6]:
+                b = Gtk.Button(tooltip_text="#" + to_hex(colour), valign=Gtk.Align.CENTER)
+                b.add_css_class("recent-colour")
+                fill = KeyColour(colour)
+                fill.set_size_request(24, 24)
+                b.set_child(fill)
+                b.update_property([Gtk.AccessibleProperty.LABEL], [f"Use recent colour #{to_hex(colour)}"])
+                b.connect("clicked", lambda *_, c=tuple(colour): self.set_rgb(c, "recent"))
+                row.append(b)
+            right.append(row)
 
         self.apply_btn = Gtk.Button(label=apply_label)
         self.apply_btn.add_css_class("filled")

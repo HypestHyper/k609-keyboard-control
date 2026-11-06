@@ -97,3 +97,14 @@ def test_old_settings_folder_moves(tmp_path, monkeypatch):
     assert settings.config_dir() == str(tmp_path / "k609-keyboard-control")
     assert (tmp_path / "k609-keyboard-control" / "settings.json").exists()
     assert not (tmp_path / "horus-control").exists()
+
+
+
+def test_recent_colours(tmp_path):
+    r = []
+    for h in ("ff0000", "00ff00", "ff0000", "0000ff", "111111", "222222", "333333", "444444"):
+        r = settings.remember(r, h)
+    assert r == ["444444", "333333", "222222", "111111", "0000ff", "ff0000"]
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"version": 1, "recent_colours": ["ff0000", "nothex", 5, "00ff00"]}))
+    assert settings.load(str(path)).recent_colours == ["ff0000", "00ff00"]

@@ -1607,7 +1607,7 @@ class Window(Gtk.ApplicationWindow):
         box.append(bright)
         box.append(label("Paint colour", "heading"))
         box.append(ColourPicker(self.paint_rgb, lambda rgb: self._paint_all(rgb), apply_label="Paint all keys",
-                                on_change=lambda rgb: setattr(self, "paint_rgb", rgb)))
+                                on_change=lambda rgb: setattr(self, "paint_rgb", rgb), recent=self._recent()))
         row = hbox(10)
         send = Gtk.Button(label="Send to keyboard")
         send.add_css_class("filled")
@@ -1626,8 +1626,17 @@ class Window(Gtk.ApplicationWindow):
         box.append(row)
         return box
 
+    def _recent(self):
+        return [tuple(bytes.fromhex(h)) for h in self.app.settings.recent_colours]
+
+    def _remember_colour(self, rgb):
+        hexv = bytes(rgb).hex()
+        if self.app.settings.recent_colours[:1] != [hexv]:
+            self.app.change(recent_colours=settings_mod.remember(self.app.settings.recent_colours, hexv))
+
     def _paint_key(self, number, fill, cap, button, name):
         rgb = tuple(self.paint_rgb)
+        self._remember_colour(rgb)
         self.selfdef[number] = rgb
         fill.set_rgb(rgb)
         for side in ("dark", "light"):
@@ -1639,6 +1648,7 @@ class Window(Gtk.ApplicationWindow):
             GLib.idle_add(lambda: (self.render(), False)[1])
 
     def _paint_all(self, rgb):
+        self._remember_colour(rgb)
         self.selfdef = {n: tuple(rgb) for n in keymap.LAYOUT}
         self.selfdef_dirty = True
         self.render()
@@ -1684,7 +1694,7 @@ class Window(Gtk.ApplicationWindow):
             self.picker_rgb = tuple(bytes.fromhex(last)) if last else (255, 255, 255)
         picker = ColourPicker(self.picker_rgb,
                               lambda rgb: self._send_colour(iface, bytes(rgb).hex(), "#" + bytes(rgb).hex()),
-                              on_change=lambda rgb: setattr(self, "picker_rgb", rgb))
+                              on_change=lambda rgb: setattr(self, "picker_rgb", rgb), recent=self._recent())
         picker.set_sensitive_apply(not self.light_busy)
         box.append(picker)
         box.append(label("Dragging only changes the preview; Apply colour sends it to the keyboard.",
@@ -1694,6 +1704,7 @@ class Window(Gtk.ApplicationWindow):
     def _send_colour(self, iface, hexv, name):
         if self.light_busy:
             return
+        self._remember_colour(tuple(bytes.fromhex(hexv)))
         rgb = tuple(bytes.fromhex(hexv))
 
         def job():
@@ -1844,8 +1855,9 @@ class Window(Gtk.ApplicationWindow):
             row.append(b)
         box.append(row)
         exp = Gtk.Expander(label="Custom colour")
-        exp.set_child(ColourPicker(tuple(bytes.fromhex(s.accent)), lambda rgb: self._set_accent(bytes(rgb).hex()),
-                                   apply_label="Use this colour"))
+        exp.set_child(ColourPicker(tuple(bytes.fromhex(s.accent)),
+                                   lambda rgb: (self._remember_colour(rgb), self._set_accent(bytes(rgb).hex())),
+                                   apply_label="Use this colour", recent=self._recent()))
         box.append(exp)
         return box
 

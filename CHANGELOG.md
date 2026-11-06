@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2 (2026-11-06)
+
+- **Recent colours:** the colour pickers show the last six colours you used, one click to reuse.
+
 ## 0.13.1 (2026-11-06)
 
 - **Self define brightness** (0–4). The keyboard has no brightness for Self define, so the app dims the
