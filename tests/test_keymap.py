@@ -22,7 +22,7 @@ def caps_as_esc():
 def test_rule_places_every_key_on_its_default_code():
     keymap.check(caps_default())
     cur = keymap.current(caps_default())
-    assert len(cur) == 66
+    assert len(cur) == 67
     assert all(cur[k.name] == k.default for k in keymap.REMAPPABLE)
 
 
@@ -113,6 +113,7 @@ def test_read_header_from_keyboard():
 
 def test_layout_covers_every_key():
     assert set(keymap.LAYOUT) == {k.number for k in keymap.KEYS} | set(keymap.SPECIAL)
+    assert not {k.number for k in keymap.KEYS} & set(keymap.SPECIAL)
     for x1, y1, x2, y2 in keymap.LAYOUT.values():
         assert 16 <= x1 < x2 <= 606 and 54 <= y1 < y2 <= 232
 
@@ -134,3 +135,17 @@ def test_normal_key_to_modifier_uses_modifier_type():
     w = keymap.build_write(caps_default(), {"Caps Lock": 0xE0})
     assert w[8 + 4 * 143:8 + 4 * 144] == bytes.fromhex("060000e0")
     assert keymap.current(bytes.fromhex("0684d80084000000") + w[8:])["Caps Lock"] == 0xE0
+
+
+
+def test_right_ctrl_matches_recorded_remap_and_reset():
+    # User's log: Right Ctrl -> E changed entry 65: 20 01 00 00 -> 00 00 00 08, reset restored it.
+    assert keymap.current(caps_default())["Right Ctrl"] == 0xE4
+    w = keymap.build_write(caps_default(), {"Right Ctrl": 0x08})
+    assert w[8 + 4 * 65:8 + 4 * 66] == bytes.fromhex("00000008")
+    remapped = bytes.fromhex("0684d80084000000") + w[8:]
+    assert keymap.current(remapped)["Right Ctrl"] == 0x08
+    back = keymap.build_write(remapped, {"Right Ctrl": 0xE4})
+    assert back[8 + 4 * 65:8 + 4 * 66] == bytes.fromhex("20010000")
+    assert back[8:] == caps_default()[8:]
+    assert "Fn" not in {k.name for k in keymap.KEYS}

@@ -35,6 +35,7 @@ class Key:
     number: int          # key number in the official software (Cfg.ini)
     default: int         # USB key code
     entry: int           # entry in the key map, from the rule above
+    special: bytes = b""  # the key's own default entry when it isn't a plain code (Right Ctrl)
 
     @property
     def remappable(self) -> bool:
@@ -63,6 +64,9 @@ KEYS: tuple[Key, ...] = (
     Key(".", 58, 0x37, 58), Key("/", 64, 0x38, 64), Key("Right Shift", 82, 0xe5, 82),
     Key("Up", 88, 0x52, 88), Key("Left Ctrl", 5, 0xe0, 5), Key("Left Super", 11, 0xe3, 144),
     Key("Left Alt", 17, 0xe2, 17), Key("Space", 35, 0x2c, 35), Key("Right Alt", 53, 0xe6, 146),
+    # Right Ctrl's default entry is 20 01 00 00 (a special type, like Fn's 20 00 00 00). The official
+    # software remapped it to E (00 00 00 08) and reset it back to 20 01 00 00 (user's log, 2026-11-06).
+    Key("Right Ctrl", 65, 0xe4, 65, bytes.fromhex("20010000")),
     Key("Left", 83, 0x50, 139), Key("Down", 89, 0x51, 89), Key("Right", 95, 0x4f, 140),
 )
 REMAPPABLE = tuple(k for k in KEYS if k.remappable)
@@ -88,11 +92,11 @@ LAYOUT: dict[int, tuple[int, int, int, int]] = {
     65: (466, 204, 492, 231), 83: (504, 204, 530, 231), 89: (542, 204, 568, 231), 95: (579, 205, 605, 232),
 }
 # Keys drawn but never remapped: the Fn key and the special key right of it (type 20 entries).
-SPECIAL = {59: "Fn", 65: "Ctrl"}
+SPECIAL = {59: "Fn"}
 # Short keycap labels.
 CAP_LABELS = {
     "Backspace": "⌫", "Delete": "Del", "Page Up": "PgUp", "Page Down": "PgDn", "Caps Lock": "Caps",
-    "Left Shift": "Shift", "Right Shift": "Shift", "Left Ctrl": "Ctrl", "Left Super": "Win",
+    "Left Shift": "Shift", "Right Shift": "Shift", "Left Ctrl": "Ctrl", "Right Ctrl": "Ctrl", "Left Super": "Win",
     "Left Alt": "Alt", "Right Alt": "Alt", "Space": "", "Up": "↑", "Down": "↓", "Left": "←",
     "Right": "→", "Enter": "Enter",
 }
@@ -149,6 +153,8 @@ def check(data: bytes) -> None:
         entry = at[3] + POINTER_BASE if at[0] == POINTER else k.number
         if entry != k.entry:
             raise UnexpectedKeymap(f"{k.name} isn't where it's expected in the key map.")
+        if k.special and e[entry] == k.special:
+            continue
         if e[entry][0] != entry_type(e[entry][3]) or e[entry][1:3] != b"\0\0":
             raise UnexpectedKeymap(f"{k.name}'s entry has an unexpected type.")
 
@@ -157,7 +163,8 @@ def current(data: bytes) -> dict[str, int]:
     """Key name -> USB code it currently sends, for remappable keys."""
     check(data)
     e = entries(data)
-    return {k.name: e[k.entry][3] for k in REMAPPABLE}
+    return {k.name: k.default if k.special and e[k.entry] == k.special else e[k.entry][3]
+            for k in REMAPPABLE}
 
 
 def build_write(data: bytes, changes: dict[str, int]) -> bytes:
@@ -169,8 +176,13 @@ def build_write(data: bytes, changes: dict[str, int]) -> bytes:
             raise ValueError(f"{name} can't be remapped")
         if code not in TARGETS:
             raise ValueError("not a supported key code")
-        off = 8 + 4 * by_name[name].entry
+        key = by_name[name]
+        off = 8 + 4 * key.entry
+        if key.special and code == key.default:
+            out[off:off + 4] = key.special
+            continue
         out[off] = entry_type(code)
+        out[off + 1:off + 3] = b"\0\0"
         out[off + 3] = code
     return bytes(out)
 

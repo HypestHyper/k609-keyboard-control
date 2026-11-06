@@ -815,8 +815,8 @@ class Window(Gtk.ApplicationWindow):
         for w in (dd, apply_btn):
             w.set_sensitive(not self.keys_busy)
         box.append(row)
-        box.append(label("Click a key to change it. Fn and the Ctrl next to it are locked, because they "
-                         "switch the keyboard's Fn layer. The macro, media and volume controls aren't part "
+        box.append(label("Click a key to change it. Fn is locked, because it switches the keyboard's "
+                         "Fn layer. The macro, media and volume controls aren't part "
                          "of the key map.", "small", "dim"))
 
         box.append(Gtk.Box(css_classes=["divider"]))
