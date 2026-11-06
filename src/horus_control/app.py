@@ -334,6 +334,7 @@ class Window(Gtk.ApplicationWindow):
         self.light_busy = False
         self.light_message = ("", "dim")
         self.picker_rgb = None                  # colour shown in the Fixed on colour picker
+        self.autoloaded = {}                    # tab -> devnode already read automatically
         self.settings_page = self._page("settings")
         self._build_settings()
         self.tabs[0].set_active(True)
@@ -361,6 +362,26 @@ class Window(Gtk.ApplicationWindow):
     def _on_tab(self, button, name):
         if button.get_active():
             self.stack.set_visible_child_name(name)
+            GLib.idle_add(lambda: (self._autoload(), False)[1])
+
+    def _autoload(self):
+        """Read the keyboard when the Lighting or Keys tab is shown and nothing is loaded yet.
+
+        Tries once per tab and keyboard node, so a failing read isn't repeated on every redraw; the
+        Load button stays as a fallback.
+        """
+        tab = self.stack.get_visible_child_name()
+        iface = self._iface()
+        if iface is None or not iface.access:
+            return
+        if tab == "lighting" and self.light_state is None and not self.light_busy:
+            if self.autoloaded.get("lighting") != iface.devnode:
+                self.autoloaded["lighting"] = iface.devnode
+                self._light_run(lambda: lighting.read_state(iface.devnode, handle=self.handle), lambda st: "")
+        elif tab == "keys" and self.keys_state is None and not self.keys_busy:
+            if self.autoloaded.get("keys") != iface.devnode:
+                self.autoloaded["keys"] = iface.devnode
+                self._keys_run(lambda: keymap.read(iface.devnode, handle=self.handle), lambda cur: "")
 
     def _on_key(self, _ctrl, keyval, _code, state):
         if state & Gdk.ModifierType.ALT_MASK and Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
@@ -414,6 +435,9 @@ class Window(Gtk.ApplicationWindow):
         keep = iface.devnode if iface and iface.access else None
         threading.Thread(target=self.handle.close, kwargs={"unless": keep}, daemon=True).start()
         self.render()
+        if keep is None:
+            self.autoloaded.clear()             # read again after a reconnect
+        GLib.idle_add(lambda: (self._autoload(), False)[1])
         return False
 
     def current(self) -> Keyboard | None:
@@ -1368,6 +1392,7 @@ class Window(Gtk.ApplicationWindow):
                     self.picker_rgb = None
                 self.keys_state = None          # reload from the keyboard next time
                 self.light_state = None
+                self.autoloaded.clear()
             self.render()
             self.say(self.profile_message[0])
             return False

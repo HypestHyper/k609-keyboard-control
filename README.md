@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: v0.10.** It finds the keyboard, picks its configuration interface
+**Status: v0.10.1.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.10.0-x86_64.AppImage
+./dist/Horus_Control-0.10.1-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -151,7 +151,7 @@ Apply from the Profiles tab, or from the command line (it applies, prints the re
 notification when started from a key binding, and exits):
 
 ```bash
-./dist/Horus_Control-0.10.0-x86_64.AppImage --apply-profile Gaming
+./dist/Horus_Control-0.10.1-x86_64.AppImage --apply-profile Gaming
 ```
 
 To switch from the keyboard, remap a spare key to F13–F24 and bind it in Hyprland, for example:
