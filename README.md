@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: v0.7.1.** It finds the keyboard, picks its configuration interface
+**Status: v0.7.2.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.7.1-x86_64.AppImage
+./dist/Horus_Control-0.7.2-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -115,8 +115,13 @@ Esc = 147). Saves use `06 04 d8 00 40 00 00 00` + the map, once, then Horus Cont
 to check. Horus Control's saves for the recorded remap and reset are byte-for-byte identical to
 Redragon's.
 
-Supported: normal keys to normal key codes (letters, numbers, punctuation, F1–F24, navigation,
-editing keys). Not yet: modifiers, media keys, Fn. **Reset all keys** restores every key's
+The entry type follows the code: `06` for modifiers (`e0`–`e7`), `00` otherwise. This was confirmed
+by remapping Ctrl, Shift, Win and Alt to letters and back in Redragon's software.
+
+Supported: every key except Fn and the special Ctrl next to it, to letters, numbers, punctuation,
+F1–F24, navigation and editing keys, or modifiers. Not yet: media keys. Remapping a normal key to a
+modifier (for example Caps Lock to Ctrl) isn't offered by Redragon's software; it uses the same entry
+format as the keyboard's own modifier keys. **Reset all keys** restores every key's
 default code and works with the mouse alone.
 
 ## Finding what each setting does

@@ -5,8 +5,9 @@ and 256 entries of 4 bytes: type, two zero bytes, USB key code. Each key's entry
 from the official software's Cfg.ini; when that entry has type 02 it points elsewhere, and the
 key's real entry is its code + 132. This rule places all 66 non-Fn keys at an entry holding their
 default code, and matches two remaps recorded from the official software (Caps Lock = 143,
-Esc = 147). Only type 00 entries (normal keys) are changed, to other normal key codes, which is
-what those recordings show. Modifiers, media keys and Fn are left alone.
+Esc = 147). The entry type follows the key code: 06 for modifiers (e0-e7), 00 for everything
+else, as seen when the official software remapped Ctrl, Shift, Win and Alt to letters and back.
+Media keys and the Fn keys are left alone.
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ READ_HEADER = bytes.fromhex("0684d80084000000")
 POINTER = 0x02
 NORMAL = 0x00
 POINTER_BASE = 132
+MODIFIER = 0x06
+
+
+def entry_type(code: int) -> int:
+    return MODIFIER if 0xE0 <= code <= 0xE7 else NORMAL
 SAVE_GAP = 0.03          # the official software saved about 30 ms after reading
 
 
@@ -32,7 +38,7 @@ class Key:
 
     @property
     def remappable(self) -> bool:
-        return self.default < 0xE0       # modifiers keep their own entry type
+        return True                      # every key in KEYS; the Fn keys aren't in KEYS
 
 
 KEYS: tuple[Key, ...] = (
@@ -90,7 +96,9 @@ CAP_LABELS = {
     "Left Alt": "Alt", "Right Alt": "Alt", "Space": "", "Up": "↑", "Down": "↓", "Left": "←",
     "Right": "→", "Enter": "Enter",
 }
-SHORT_TARGETS = {"Backspace": "⌫", "Delete": "Del", "Page Up": "PgUp", "Page Down": "PgDn",
+SHORT_TARGETS = {"Left Ctrl": "Ctrl", "Right Ctrl": "Ctrl", "Left Shift": "Shift", "Right Shift": "Shift",
+                 "Left Alt": "Alt", "Right Alt": "Alt", "Left Super": "Win", "Right Super": "Win",
+                 "Backspace": "⌫", "Delete": "Del", "Page Up": "PgUp", "Page Down": "PgDn",
                  "Caps Lock": "Caps", "Print Screen": "PrtSc", "Scroll Lock": "ScrLk", "Insert": "Ins",
                  "Up": "↑", "Down": "↓", "Left": "←", "Right": "→", "Space": "Space"}
 
@@ -112,6 +120,8 @@ TARGETS.update({
     0x46: "Print Screen", 0x47: "Scroll Lock", 0x48: "Pause", 0x49: "Insert", 0x4a: "Home",
     0x4b: "Page Up", 0x4c: "Delete", 0x4d: "End", 0x4e: "Page Down", 0x4f: "Right",
     0x50: "Left", 0x51: "Down", 0x52: "Up", 0x65: "Menu",
+    0xe0: "Left Ctrl", 0xe1: "Left Shift", 0xe2: "Left Alt", 0xe3: "Left Super",
+    0xe4: "Right Ctrl", 0xe5: "Right Shift", 0xe6: "Right Alt", 0xe7: "Right Super",
 })
 for _i in range(12):
     TARGETS[0x68 + _i] = f"F{_i + 13}"
@@ -139,7 +149,7 @@ def check(data: bytes) -> None:
         entry = at[3] + POINTER_BASE if at[0] == POINTER else k.number
         if entry != k.entry:
             raise UnexpectedKeymap(f"{k.name} isn't where it's expected in the key map.")
-        if k.remappable and (e[entry][0] != NORMAL or e[entry][1:3] != b"\0\0"):
+        if e[entry][0] != entry_type(e[entry][3]) or e[entry][1:3] != b"\0\0":
             raise UnexpectedKeymap(f"{k.name}'s entry has an unexpected type.")
 
 
@@ -159,7 +169,9 @@ def build_write(data: bytes, changes: dict[str, int]) -> bytes:
             raise ValueError(f"{name} can't be remapped")
         if code not in TARGETS:
             raise ValueError("not a supported key code")
-        out[8 + 4 * by_name[name].entry + 3] = code
+        off = 8 + 4 * by_name[name].entry
+        out[off] = entry_type(code)
+        out[off + 3] = code
     return bytes(out)
 
 

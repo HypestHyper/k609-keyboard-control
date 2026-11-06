@@ -7,7 +7,7 @@
   each copied from captures of the official software: the lighting block
   save (`06 03 c6`, only decoded bytes changed) and the colour table (`06 08 c8`, must equal
   `colour_table.hex` except bytes 29–31), and the key map save (`06 04 d8 00 40`, built only by
-  `keymap.py`, normal-key codes only). Anything new needs the same capture evidence and user
+  `keymap.py`; entry type 00/06 follows the code; Fn keys untouched). Anything new needs the same capture evidence and user
   approval. Gate new features through
   `capabilities.require_usable()`; keep UI code away from raw bytes.
 - Never open interface 0 or read input reports (no keystrokes).

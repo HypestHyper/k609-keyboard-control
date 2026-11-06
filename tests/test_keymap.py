@@ -22,7 +22,7 @@ def caps_as_esc():
 def test_rule_places_every_key_on_its_default_code():
     keymap.check(caps_default())
     cur = keymap.current(caps_default())
-    assert len(cur) == 60
+    assert len(cur) == 66
     assert all(cur[k.name] == k.default for k in keymap.REMAPPABLE)
 
 
@@ -42,9 +42,9 @@ def test_build_write_matches_official_save():
 
 def test_build_write_refuses_unsupported():
     with pytest.raises(ValueError):
-        keymap.build_write(caps_default(), {"Left Shift": 0x04})
+        keymap.build_write(caps_default(), {"Fn": 0x04})
     with pytest.raises(ValueError):
-        keymap.build_write(caps_default(), {"A": 0xE0})
+        keymap.build_write(caps_default(), {"A": 0xB5})        # media keys not supported
     bad = bytearray(caps_default()); bad[8 + 4 * 3] = 0x00          # Caps Lock pointer broken
     with pytest.raises(keymap.UnexpectedKeymap):
         keymap.build_write(bytes(bad), {"A": 0x05})
@@ -115,3 +115,22 @@ def test_layout_covers_every_key():
     assert set(keymap.LAYOUT) == {k.number for k in keymap.KEYS} | set(keymap.SPECIAL)
     for x1, y1, x2, y2 in keymap.LAYOUT.values():
         assert 16 <= x1 < x2 <= 606 and 54 <= y1 < y2 <= 232
+
+
+
+def test_modifier_remaps_match_what_the_keyboard_recorded():
+    # From the user's Key map log (2026-11-06), official software remaps and reset:
+    w = keymap.build_write(caps_default(), {"Left Ctrl": 0x04, "Right Alt": 0x05,
+                                            "Left Shift": 0x06, "Left Super": 0x07})
+    e = keymap.entries(bytes.fromhex("0684d80084000000") + w[8:])
+    assert e[5] == bytes.fromhex("00000004") and e[146] == bytes.fromhex("00000005")
+    assert e[4] == bytes.fromhex("00000006") and e[144] == bytes.fromhex("00000007")
+    back = keymap.build_write(bytes.fromhex("0684d80084000000") + w[8:],
+                              {k.name: k.default for k in keymap.KEYS})
+    assert back[8:] == caps_default()[8:]
+
+
+def test_normal_key_to_modifier_uses_modifier_type():
+    w = keymap.build_write(caps_default(), {"Caps Lock": 0xE0})
+    assert w[8 + 4 * 143:8 + 4 * 144] == bytes.fromhex("060000e0")
+    assert keymap.current(bytes.fromhex("0684d80084000000") + w[8:])["Caps Lock"] == 0xE0

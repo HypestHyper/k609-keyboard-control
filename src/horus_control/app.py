@@ -815,9 +815,9 @@ class Window(Gtk.ApplicationWindow):
         for w in (dd, apply_btn):
             w.set_sensitive(not self.keys_busy)
         box.append(row)
-        box.append(label("Click a key to change it. Modifiers, Fn and the special Ctrl can't be remapped "
-                         "yet; the macro, media and volume controls aren't part of the key map.",
-                         "small", "dim"))
+        box.append(label("Click a key to change it. Fn and the Ctrl next to it are locked, because they "
+                         "switch the keyboard's Fn layer. The macro, media and volume controls aren't part "
+                         "of the key map.", "small", "dim"))
 
         box.append(Gtk.Box(css_classes=["divider"]))
         changed = [k for k in keymap.REMAPPABLE if cur[k.name] != k.default]
