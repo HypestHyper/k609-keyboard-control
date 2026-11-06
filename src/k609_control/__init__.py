@@ -1,3 +1,5 @@
+"""Keyboard Control: unofficial lighting, key remapping and macro tool for the Redragon Horus SE K609."""
+
 __version__ = "0.12.0"
 
 APP_ID = "io.github.HypestHyper.K609KeyboardControl"
