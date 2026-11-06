@@ -47,6 +47,17 @@ def template(name: str) -> bytes:
     return _templates[name]
 
 
+MAX_BRIGHTNESS = 4      # same 0-4 steps as the keyboard's other effects
+
+
+def dim(colours: dict[int, tuple[int, int, int]], brightness: int) -> dict[int, tuple[int, int, int]]:
+    """Self define has no brightness of its own (Redragon's software offers none either), so the app
+    scales the colours it sends: 4 = as painted, 0 = off."""
+    if not 0 <= brightness <= MAX_BRIGHTNESS:
+        raise ValueError("brightness out of range")
+    return {n: tuple(round(c * brightness / MAX_BRIGHTNESS) for c in rgb) for n, rgb in colours.items()}
+
+
 def build_colour_table(colours: dict[int, tuple[int, int, int]]) -> bytes:
     """colours: key number -> (r, g, b); keys not given are black."""
     t = bytearray(template("cc"))
@@ -69,11 +80,12 @@ def is_second_table_write(buf: bytes) -> bool:
     return bytes(buf) == template("d0")
 
 
-def apply(devnode: str, colours: dict[int, tuple[int, int, int]], **io) -> lighting.State:
+def apply(devnode: str, colours: dict[int, tuple[int, int, int]], brightness: int = MAX_BRIGHTNESS,
+          **io) -> lighting.State:
     """Send the per-key colours and switch the effect to Self define, as the official software does."""
     capabilities.require_usable("lighting")
     capabilities.require_usable("selfdefine")
-    table = build_colour_table(colours)
+    table = build_colour_table(dim(colours, brightness))
     with Session(devnode, **io) as s:
         res = s.read_lighting()
         if not res.ok:
@@ -118,14 +130,22 @@ def from_json(data) -> dict[int, tuple[int, int, int]]:
     return out
 
 
-def load(path: str | None = None) -> dict[int, tuple[int, int, int]]:
+def load_all(path: str | None = None) -> tuple[dict[int, tuple[int, int, int]], int]:
+    """(colours, brightness) as last saved."""
     try:
         with open(path or store_path(), encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return {}
-    return from_json(data.get("colours") if isinstance(data, dict) and data.get("version") == 1 else None)
+        return {}, MAX_BRIGHTNESS
+    if not isinstance(data, dict) or data.get("version") != 1:
+        return {}, MAX_BRIGHTNESS
+    b = data.get("brightness", MAX_BRIGHTNESS)
+    return from_json(data.get("colours")), b if isinstance(b, int) and 0 <= b <= MAX_BRIGHTNESS else MAX_BRIGHTNESS
 
 
-def save(colours: dict[int, tuple[int, int, int]], path: str | None = None) -> None:
-    atomic_write_json(path or store_path(), {"version": 1, "colours": to_json(colours)})
+def load(path: str | None = None) -> dict[int, tuple[int, int, int]]:
+    return load_all(path)[0]
+
+
+def save(colours: dict[int, tuple[int, int, int]], path: str | None = None, brightness: int = MAX_BRIGHTNESS) -> None:
+    atomic_write_json(path or store_path(), {"version": 1, "colours": to_json(colours), "brightness": brightness})

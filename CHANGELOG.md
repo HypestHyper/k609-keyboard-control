@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1 (2026-11-06)
+
+- **Self define brightness** (0–4). The keyboard has no brightness for Self define, so the app dims the
+  colours it sends; your painted colours are kept as they are.
+
 ## 0.13.0 (2026-11-06)
 
 - **Self define:** paint every key its own colour on a picture of the keyboard, with the colour wheel, and send it.

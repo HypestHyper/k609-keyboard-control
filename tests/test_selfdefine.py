@@ -59,3 +59,21 @@ def test_storage_roundtrip(tmp_path):
     colours = {1: (255, 0, 0), 35: (0, 0, 255), 9: (0, 0, 0)}
     selfdefine.save(colours, str(tmp_path / "s.json"))
     assert selfdefine.load(str(tmp_path / "s.json")) == {1: (255, 0, 0), 35: (0, 0, 255)}
+
+
+
+def test_brightness_scales_what_is_sent():
+    assert selfdefine.dim({1: (255, 128, 0)}, 4) == {1: (255, 128, 0)}
+    assert selfdefine.dim({1: (255, 128, 0)}, 2) == {1: (128, 64, 0)}
+    assert selfdefine.dim({1: (255, 128, 0)}, 0) == {1: (0, 0, 0)}
+    with pytest.raises(ValueError):
+        selfdefine.dim({1: (1, 1, 1)}, 5)
+    kb = SelfDefineKeyboard()
+    selfdefine.apply("/dev/x", {1: (255, 0, 0)}, 1, **kb.io())
+    assert kb.tables[0][29] == 64
+
+
+def test_brightness_is_stored(tmp_path):
+    path = str(tmp_path / "s.json")
+    selfdefine.save({1: (255, 0, 0)}, path, brightness=2)
+    assert selfdefine.load_all(path) == ({1: (255, 0, 0)}, 2)

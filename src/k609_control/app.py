@@ -334,7 +334,7 @@ class Window(Gtk.ApplicationWindow):
         self.light_message = ("", "dim")
         self.picker_rgb = None                  # colour shown in the Fixed on colour picker
         self.autoloaded = {}                    # tab -> devnode already read automatically
-        self.selfdef = selfdefine.load()        # key number -> (r, g, b), last sent or being edited
+        self.selfdef, self.selfdef_brightness = selfdefine.load_all()   # key colours as painted, and 0-4
         self.selfdef_dirty = False
         self.paint_rgb = (255, 255, 255)
         self.selfdef_view = KeyboardView()
@@ -1352,8 +1352,8 @@ class Window(Gtk.ApplicationWindow):
         existing = profiles.find(name)
         colour = self.app.settings.fixed_colour or None
         current = list(self.macro_list)
-        selfdef = dict(self.selfdef)
-        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current, selfdef,
+        selfdef, sb = dict(self.selfdef), self.selfdef_brightness
+        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current, selfdef, sb,
                                                                             handle=self.handle)),
                           lambda _r: f"{'Updated' if existing else 'Saved'} profile “{name}”.",
                           clear_name=True)
@@ -1467,7 +1467,8 @@ class Window(Gtk.ApplicationWindow):
                     self.picker_rgb = None
                 if r.selfdef:
                     self.selfdef = dict(r.selfdef)
-                    selfdefine.save(self.selfdef)
+                    self.selfdef_brightness = r.selfdef_brightness
+                    selfdefine.save(self.selfdef, brightness=self.selfdef_brightness)
                 self.keys_state = None          # reload from the keyboard next time
                 self.light_state = None
                 self.autoloaded.clear()
@@ -1540,7 +1541,8 @@ class Window(Gtk.ApplicationWindow):
                     row.set_sensitive(not self.light_busy)
                     card.append(row)
             else:
-                card.append(label(f"{st.name} has no brightness or speed setting.", "small", "dim"))
+                if st.effect != lighting.SELF_DEFINE:
+                    card.append(label(f"{st.name} has no brightness or speed setting.", "small", "dim"))
 
         text, kind = self.light_message
         if text:
@@ -1596,6 +1598,13 @@ class Window(Gtk.ApplicationWindow):
             parent.remove(self.selfdef_view)
         self.selfdef_view.set_keys(buttons)
         box.append(self.selfdef_view)
+        levels = [(str(i), str(i)) for i in range(selfdefine.MAX_BRIGHTNESS + 1)]
+        bright = self._group_row("Brightness", "Dims every key's colour when sending: 4 is as painted, 0 turns "
+                                               "the keys off. Changes are sent straight away.",
+                                 levels, str(self.selfdef_brightness),
+                                 lambda v: self._set_selfdef_brightness(iface, int(v)))
+        bright.set_sensitive(not self.light_busy)
+        box.append(bright)
         box.append(label("Paint colour", "heading"))
         box.append(ColourPicker(self.paint_rgb, lambda rgb: self._paint_all(rgb), apply_label="Paint all keys",
                                 on_change=lambda rgb: setattr(self, "paint_rgb", rgb)))
@@ -1634,15 +1643,22 @@ class Window(Gtk.ApplicationWindow):
         self.selfdef_dirty = True
         self.render()
 
-    def _send_selfdef(self, iface):
+    def _set_selfdef_brightness(self, iface, level):
+        if level == self.selfdef_brightness:
+            return
+        self.selfdef_brightness = level
+        self._send_selfdef(iface, f"Brightness {level} for Self define.")
+
+    def _send_selfdef(self, iface, message="Sent the key colours."):
         colours = dict(self.selfdef)
+        level = self.selfdef_brightness
 
         def job():
-            st = selfdefine.apply(iface.devnode, colours, handle=self.handle)
-            selfdefine.save(colours)
+            st = selfdefine.apply(iface.devnode, colours, level, handle=self.handle)
+            selfdefine.save(colours, brightness=level)
             self.selfdef_dirty = False
             return st
-        self._light_run(job, lambda st: "Sent the key colours.")
+        self._light_run(job, lambda st: message)
 
     def _colour_section(self, iface) -> Gtk.Widget:
         from .style import SWATCHES

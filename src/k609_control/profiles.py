@@ -27,12 +27,13 @@ class Profile:
     keys: dict[str, int]                    # key name -> USB code (normal keys and modifiers)
     macros: list[macros.Macro] = field(default_factory=list)   # with their key assignments
     selfdef: dict[int, tuple[int, int, int]] = field(default_factory=dict)   # Self define key colours
+    selfdef_brightness: int = selfdefine.MAX_BRIGHTNESS
 
     def to_dict(self) -> dict:
         return {"version": SCHEMA_VERSION, "name": self.name, "effect": self.effect,
                 "levels": {f"{e:02x}": v for e, v in self.levels.items()}, "colour": self.colour,
                 "keys": self.keys, "macros": [m.to_dict() for m in self.macros],
-                "selfdefine": selfdefine.to_json(self.selfdef)}
+                "selfdefine": selfdefine.to_json(self.selfdef), "selfdefine_brightness": self.selfdef_brightness}
 
 
 def profiles_dir() -> str:
@@ -53,6 +54,8 @@ def validate(p: Profile) -> None:
             not 0 <= v <= 0xFF or v >> 4 > lighting.MAX_LEVEL or v & 0xF > lighting.MAX_LEVEL
             for v in p.levels.values()):
         raise ValueError("Bad brightness or speed values.")
+    if not 0 <= p.selfdef_brightness <= selfdefine.MAX_BRIGHTNESS:
+        raise ValueError("Bad Self define brightness.")
     if p.colour is not None and not re.fullmatch(r"[0-9a-f]{6}", p.colour):
         raise ValueError("Bad colour.")
     names = {k.name for k in keymap.REMAPPABLE}
@@ -80,7 +83,8 @@ def from_dict(data) -> Profile:
     p = Profile(str(data["name"]), int(data["effect"]),
                 {int(k, 16): int(v) for k, v in data["levels"].items()},
                 data.get("colour"), {str(k): int(v) for k, v in data["keys"].items()}, ms,
-                selfdefine.from_json(data.get("selfdefine", {})))
+                selfdefine.from_json(data.get("selfdefine", {})),
+                int(data.get("selfdefine_brightness", selfdefine.MAX_BRIGHTNESS)))
     validate(p)
     return p
 
@@ -122,7 +126,7 @@ def delete(name: str, folder: str | None = None) -> None:
 
 
 def capture(devnode: str, name: str, colour: str | None, current_macros: list[macros.Macro],
-            selfdef: dict | None = None, **io) -> Profile:
+            selfdef: dict | None = None, selfdef_brightness: int = selfdefine.MAX_BRIGHTNESS, **io) -> Profile:
     """Read the keyboard's lighting and keys; macros and colour come from Keyboard Control's own copy."""
     st = lighting.read_state(devnode, **io)
     keys = keymap.read(devnode, **io)
@@ -130,7 +134,7 @@ def capture(devnode: str, name: str, colour: str | None, current_macros: list[ma
     normal = {k: c for k, c in keys.items() if c < keymap.MACRO_CODE and k not in assigned}
     p = Profile(name, st.effect, dict(st.levels), colour, normal,
                 [macros.Macro(m.name, [macros.Step(s.key, s.down, s.pause) for s in m.steps], m.held, m.count, m.key)
-                 for m in current_macros], dict(selfdef or {}))
+                 for m in current_macros], dict(selfdef or {}), selfdef_brightness)
     validate(p)
     return p
 
@@ -141,7 +145,7 @@ def apply(devnode: str, p: Profile, **io) -> None:
     rgb = tuple(bytes.fromhex(p.colour)) if p.colour else None
     lighting.apply(devnode, effect=p.effect, levels=p.levels, colour=rgb, **io)
     if p.effect == lighting.SELF_DEFINE and p.selfdef:
-        selfdefine.apply(devnode, p.selfdef, **io)
+        selfdefine.apply(devnode, p.selfdef, p.selfdef_brightness, **io)
     macro_keys = {m.key for m in p.macros if m.key}
     changes = {k.name: p.keys.get(k.name, k.default) for k in keymap.REMAPPABLE if k.name not in macro_keys}
     keymap.remap(devnode, changes, **io)
