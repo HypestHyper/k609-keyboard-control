@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.3 (2026-11-06)
+
+- Scrolling over the colour sliders and the macro number boxes scrolls the page instead of changing the value.
+
 ## 0.13.2 (2026-11-06)
 
 - **Recent colours:** the colour pickers show the last six colours you used, one click to reuse.

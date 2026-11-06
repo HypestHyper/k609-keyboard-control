@@ -52,6 +52,26 @@ def stops(*pairs):
     return out
 
 
+def ignore_wheel(widget: Gtk.Widget) -> Gtk.Widget:
+    """Stop the mouse wheel and touchpad from changing a slider or number box: scroll the page instead,
+    so values don't change by accident while scrolling (family design language, CMP)."""
+    ctrl = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
+    ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+    def scrolled(_c, dx, dy):
+        parent = widget.get_parent()
+        while parent is not None and not isinstance(parent, Gtk.ScrolledWindow):
+            parent = parent.get_parent()
+        if parent is not None:
+            adj = parent.get_vadjustment()
+            step = max(1.0, adj.get_page_size() ** (2 / 3))
+            adj.set_value(min(adj.get_upper() - adj.get_page_size(), max(adj.get_lower(), adj.get_value() + dy * step)))
+        return True
+    ctrl.connect("scroll", scrolled)
+    widget.add_controller(ctrl)
+    return widget
+
+
 def to_hex(rgb) -> str:
     return "".join(f"{c:02x}" for c in rgb)
 
@@ -186,6 +206,7 @@ class ColourPicker(Gtk.Box):
             row.append(lbl)
             sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 255, 1)
             sc.set_hexpand(True)
+            ignore_wheel(sc)
             sc.set_draw_value(True)
             sc.set_value_pos(Gtk.PositionType.RIGHT)
             sc.set_digits(0)

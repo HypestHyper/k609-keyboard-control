@@ -16,7 +16,7 @@ from . import __version__, capabilities, keymap, lighting, macros, profiles, sel
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
-from .colourpicker import ColourPicker, KeyColour, readable_on  # noqa: E402
+from .colourpicker import ColourPicker, KeyColour, ignore_wheel, readable_on  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 from . import APP_ID, APP_NAME, COMMENT, desktop  # noqa: E402
@@ -1147,7 +1147,7 @@ class Window(Gtk.ApplicationWindow):
                 lambda kind, code, i=i: (self._set_step_key(m, i, code), self.render())).present())
             row.append(key)
             row.append(label("then wait", "dim", wrap=False))
-            spin = Gtk.SpinButton.new_with_range(0, macros.LONG_MAX, 10)
+            spin = ignore_wheel(Gtk.SpinButton.new_with_range(0, macros.LONG_MAX, 10))
             spin.set_value(st.pause)
             set_accessible_label(spin, f"Step {i + 1} pause in milliseconds")
             spin.connect("value-changed", lambda w, st=st: setattr(st, "pause", int(w.get_value())))
@@ -1178,7 +1178,7 @@ class Window(Gtk.ApplicationWindow):
         if not m.held:
             row = hbox(8)
             row.append(label("Times", "dim", wrap=False))
-            count = Gtk.SpinButton.new_with_range(1, 255, 1)
+            count = ignore_wheel(Gtk.SpinButton.new_with_range(1, 255, 1))
             count.set_value(m.count)
             set_accessible_label(count, "Number of times")
             count.connect("value-changed", lambda w: setattr(m, "count", int(w.get_value())))
