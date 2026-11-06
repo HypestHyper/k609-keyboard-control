@@ -13,6 +13,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -266,20 +267,76 @@ def _lighting_problem(data: bytes) -> str:
     return ""
 
 
+class Handle:
+    """Keeps the configuration interface open between operations, as the official software does.
+
+    Opening and closing hidraw for every operation lets the kernel wake the keyboard each time,
+    which made its LEDs flash. Input reports queued on this handle are never read.
+    """
+
+    def __init__(self, *, opener=os.open, closer=os.close):
+        self.lock = threading.Lock()
+        self._opener, self._closer = opener, closer
+        self.devnode: str | None = None
+        self.fd: int | None = None
+
+    def get(self, devnode: str) -> int:
+        """Open devnode (closing any other). Call with self.lock held."""
+        if self.fd is not None and self.devnode == devnode:
+            return self.fd
+        self._close()
+        self.fd = _open(devnode, self._opener)
+        self.devnode = devnode
+        return self.fd
+
+    def _close(self) -> None:
+        if self.fd is not None:
+            try:
+                self._closer(self.fd)
+            except OSError:
+                pass
+        self.fd = None
+        self.devnode = None
+
+    def close(self, unless: str | None = None) -> None:
+        """Close the handle, unless it is open on `unless`."""
+        with self.lock:
+            if unless is None or self.devnode != unless:
+                self._close()
+
+
 class Session:
-    """One open handle on the configuration interface for a read, or a read-write-verify."""
+    """The configuration interface for one read, or a read-change-save.
+
+    With a Handle, the device stays open afterwards and the handle's lock keeps operations from
+    overlapping; without one, the device is opened and closed for this session only.
+    """
 
     def __init__(self, devnode: str, *, opener=os.open, ioctl=fcntl.ioctl, closer=os.close,
-                 sleep=time.sleep):
+                 sleep=time.sleep, handle: Handle | None = None):
         self.devnode, self._opener, self._ioctl, self._closer, self._sleep = devnode, opener, ioctl, closer, sleep
+        self.handle = handle
         self.fd = None
 
     def __enter__(self):
-        self.fd = _open(self.devnode, self._opener)
+        if self.handle is None:
+            self.fd = _open(self.devnode, self._opener)
+            return self
+        self.handle.lock.acquire()
+        try:
+            self.fd = self.handle.get(self.devnode)
+        except BaseException:
+            self.handle.lock.release()
+            raise
         return self
 
-    def __exit__(self, *exc):
-        self._closer(self.fd)
+    def __exit__(self, exc_type, exc, tb):
+        if self.handle is None:
+            self._closer(self.fd)
+        else:
+            if exc_type is not None and issubclass(exc_type, DeviceGone):
+                self.handle._close()
+            self.handle.lock.release()
         return False
 
     def _gone(self, e: OSError):

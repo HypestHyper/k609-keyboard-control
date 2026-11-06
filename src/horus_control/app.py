@@ -14,7 +14,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__, capabilities, lighting, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
-from .hidraw import AccessDenied, DeviceGone, WriteFailed, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
+from .hidraw import AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -181,6 +181,8 @@ class Window(Gtk.ApplicationWindow):
         self.keyboard_page = self._page("keyboard")
         self.lighting_page = self._page("lighting")
         self.light_state = None                 # (devnode, lighting.State) once loaded
+        self.handle = Handle()                  # kept open between operations, like the official software
+        self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
         self.light_busy = False
         self.light_message = ("", "dim")
         self.settings_page = self._page("settings")
@@ -258,6 +260,10 @@ class Window(Gtk.ApplicationWindow):
         if self.feature_results and (not iface or self.feature_results[0] != iface.devnode):
             self.feature_results = None
             self.feature_message = ""
+        # Drop a handle on a keyboard that went away or changed node (off the main thread: it
+        # waits for any operation in progress).
+        keep = iface.devnode if iface and iface.access else None
+        threading.Thread(target=self.handle.close, kwargs={"unless": keep}, daemon=True).start()
         self.render()
         return False
 
@@ -536,7 +542,7 @@ class Window(Gtk.ApplicationWindow):
 
         def work():
             try:
-                res, msg = [read_lighting_block(devnode)], ""
+                res, msg = [read_lighting_block(devnode, handle=self.handle)], ""
             except AccessDenied:
                 res, msg = None, "Access denied. See the instructions above."
             except DeviceGone:
@@ -636,7 +642,7 @@ class Window(Gtk.ApplicationWindow):
             load.set_halign(Gtk.Align.START)
             load.set_sensitive(not self.light_busy)
             load.connect("clicked", lambda *_: self._light_run(
-                lambda: lighting.read_state(iface.devnode), lambda st: ""))
+                lambda: lighting.read_state(iface.devnode, handle=self.handle), lambda st: ""))
             card.append(load)
         else:
             st = self.light_state[1]
@@ -688,7 +694,8 @@ class Window(Gtk.ApplicationWindow):
             btn.set_halign(Gtk.Align.START)
             btn.set_sensitive(not self.light_busy)
             btn.connect("clicked", lambda *_: self._light_run(
-                lambda: lighting.restore(iface.devnode, lighting.backup_path(), self._known_colour()),
+                lambda: lighting.restore(iface.devnode, lighting.backup_path(), self._known_colour(),
+                                        handle=self.handle),
                 lambda st: f"Restored {st.name}."))
             rc.append(btn)
         else:
@@ -745,7 +752,7 @@ class Window(Gtk.ApplicationWindow):
         rgb = tuple(bytes.fromhex(hexv))
 
         def job():
-            st = lighting.set_fixed_colour(iface.devnode, rgb)
+            st = lighting.set_fixed_colour(iface.devnode, rgb, handle=self.handle)
             GLib.idle_add(lambda: (self.app.change(fixed_colour=hexv), False)[1])
             return st
         self._light_run(job, lambda st: f"Sent {name}. Check the keyboard: the colour can't be read back.")
@@ -757,7 +764,7 @@ class Window(Gtk.ApplicationWindow):
         if cur and all(getattr(cur, k) == v for k, v in change.items()):
             return
         colour = self._known_colour()
-        self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(),
+        self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(), handle=self.handle,
                                                colour=colour, **change),
                         lambda st: message)
 

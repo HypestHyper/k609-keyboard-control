@@ -204,3 +204,46 @@ def test_effect_change_without_known_colour_skips_table():
     kb = ColourKeyboard(block(0x01))
     lighting.apply("/dev/x", effect=0x03, **kb.io())
     assert kb.sequence == ["0583c6", "060000", "0603c6"] * 2
+
+
+class CountingOpener:
+    def __init__(self):
+        self.opened = 0
+        self.closed = 0
+
+    def open(self, path, flags):
+        self.opened += 1
+        return 7
+
+    def close(self, fd):
+        self.closed += 1
+
+
+def test_handle_keeps_device_open_between_operations():
+    kb = FakeKeyboard(block(0x01))
+    oc = CountingOpener()
+    handle = hidraw.Handle(opener=oc.open, closer=oc.close)
+    io = dict(ioctl=kb.ioctl, sleep=lambda s: None, handle=handle)
+    lighting.read_state("/dev/x", **io)
+    lighting.apply("/dev/x", effect=0x03, **io)
+    lighting.set_fixed_colour("/dev/x", (1, 2, 3), **io)
+    assert (oc.opened, oc.closed) == (1, 0)
+    handle.close(unless="/dev/x")
+    assert oc.closed == 0
+    handle.close()
+    assert oc.closed == 1 and handle.fd is None
+    lighting.read_state("/dev/y", **io)
+    assert oc.opened == 2 and handle.devnode == "/dev/y"
+
+
+def test_handle_is_dropped_when_keyboard_disappears():
+    import errno as e
+    oc = CountingOpener()
+    handle = hidraw.Handle(opener=oc.open, closer=oc.close)
+
+    def gone(*a):
+        raise OSError(e.ENODEV, "gone")
+    with pytest.raises(hidraw.DeviceGone):
+        lighting.read_state("/dev/x", ioctl=gone, sleep=lambda s: None, handle=handle)
+    assert handle.fd is None and oc.closed == 1
+    assert not handle.lock.locked()

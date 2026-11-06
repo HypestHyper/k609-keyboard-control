@@ -194,7 +194,7 @@ def apply(devnode: str, *, backup: str | None = None, colour: tuple[int, int, in
     capabilities.require_usable("lighting")
     if colour is not None:
         capabilities.require_usable("lighting_colour")
-    io = {k: change.pop(k) for k in ("opener", "ioctl", "closer", "sleep") if k in change}
+    io = {k: change.pop(k) for k in ("opener", "ioctl", "closer", "sleep", "handle") if k in change}
     return _change(devnode, backup=backup, colour=colour, change=change, io=io)
 
 
