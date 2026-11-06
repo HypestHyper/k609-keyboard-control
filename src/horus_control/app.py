@@ -19,7 +19,7 @@ from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_dif
 from .colourpicker import ColourPicker  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
-APP_ID = "io.github.hypesthyper.HorusControl"
+from . import APP_ID, APP_NAME, COMMENT, desktop  # noqa: E402
 SCAN_SECONDS = 2
 RULE_PATH = "/etc/udev/rules.d/70-horus-control.rules"
 
@@ -240,7 +240,7 @@ class KeyChooser(Gtk.Window):
 
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app: "App"):
-        super().__init__(application=app, title="Horus Control")
+        super().__init__(application=app, title=APP_NAME)
         self.app = app
         self.add_css_class("horus")
         self.set_default_size(820, 760)
@@ -266,12 +266,11 @@ class Window(Gtk.ApplicationWindow):
 
         # Header
         header = hbox(12, "header")
-        icon = Gtk.Image.new_from_icon_name("input-keyboard-symbolic")
-        icon.set_pixel_size(22)
-        icon.add_css_class("app-icon")
+        icon = Gtk.Image.new_from_file(desktop.ICON_SOURCE)
+        icon.set_pixel_size(48)
         icon.set_valign(Gtk.Align.CENTER)
         header.append(icon)
-        header.append(label("Horus Control", "app-title", wrap=False))
+        header.append(label(APP_NAME, "app-title", wrap=False))
         header.append(Gtk.Box(hexpand=True))
         self.status_holder = hbox()
         self.status_holder.set_valign(Gtk.Align.CENTER)
@@ -498,7 +497,7 @@ class Window(Gtk.ApplicationWindow):
         img.add_css_class("faint")
         box.append(img)
         box.append(label("Keyboard not found", "title", xalign=0.5))
-        box.append(label("Connect the Horus SE K609GG with its USB cable. Horus Control checks "
+        box.append(label("Connect the Horus SE K609GG with its USB cable. The app checks "
                          "again every few seconds. The 2.4 GHz receiver and Bluetooth are not supported.",
                          "dim", xalign=0.5))
         return box
@@ -551,7 +550,7 @@ class Window(Gtk.ApplicationWindow):
             card.append(label(f"No HID interface {CONFIG_INTERFACE} with vendor feature reports was "
                               "found, so this may be a different keyboard revision. Nothing will be read.",
                               "small", "error-text"))
-        card.append(label("Horus Control never opens the typing interface (interface 0) and never "
+        card.append(label("The app never opens the typing interface (interface 0) and never "
                           "reads your keystrokes.", "small", "faint"))
         return card
 
@@ -560,7 +559,7 @@ class Window(Gtk.ApplicationWindow):
         card.append(label("Your user can't open the configuration interface", "heading"))
         card.append(label(f"{iface.devnode} is owned by root, so settings can't be read. You can allow "
                           "it yourself with a udev rule that covers only this keyboard's interface 1. "
-                          "Horus Control doesn't change system files.", "small", "dim"))
+                          "The app doesn't change system files.", "small", "dim"))
         quoted = " ".join(f"'{line}'" for line in UDEV_RULE.strip().splitlines())
         cmds = (f"printf '%s\\n' {quoted} | sudo tee {RULE_PATH} > /dev/null\n"
                 "sudo udevadm control --reload\n"
@@ -588,7 +587,7 @@ class Window(Gtk.ApplicationWindow):
         reports_grid = grid
 
         card.append(label("Pick and apply one thing in Redragon's software, type what you picked, then "
-                          "press Enter. Horus Control reads the keyboard and adds what changed to your "
+                          "press Enter. the app reads the keyboard and adds what changed to your "
                           "list.", "small", "dim"))
         card.append(self._group_row("Read", "Key map: remap one key at a time in Redragon's software, "
                                             "then type which key you changed.",
@@ -782,7 +781,7 @@ class Window(Gtk.ApplicationWindow):
         kb = self.current()
         if not kb:
             return ""
-        lines = [f"Horus Control {__version__}", f"{kb.label} {kb.vendor_id:04x}:{kb.product_id:04x} "
+        lines = [f"{APP_NAME} {__version__}", f"{kb.label} {kb.vendor_id:04x}:{kb.product_id:04x} "
                  f"bcdDevice {kb.bcd_device} USB {kb.usb_version}"]
         for i in kb.interfaces:
             lines.append(f"interface {i.interface_number}: {i.devnode} descriptor "
@@ -1093,7 +1092,7 @@ class Window(Gtk.ApplicationWindow):
         text, kind = self.keys_message
         if text:
             card.append(label(text, "small", kind))
-        card.append(label("Horus Control keeps your macros in ~/.config/horus-control/macros.json, because "
+        card.append(label("The app keeps your macros in ~/.config/horus-control/macros.json, because "
                           "the keyboard can't report them back. Applying macros here replaces macros set in "
                           "Redragon's software.", "small", "faint"))
         page.append(card)
@@ -1262,7 +1261,7 @@ class Window(Gtk.ApplicationWindow):
         clear(page)
         page.append(section("Profiles", "A profile holds the lighting, key remaps and macros. Applying one "
                                         "writes them all to the keyboard. The keyboard has no profiles of its "
-                                        "own, so they're stored by Horus Control."))
+                                        "own, so they're stored by this app."))
         ready = iface is not None and iface.access
         card = vbox(10, "card")
         card.append(label("Save the current settings", "heading"))
@@ -1286,6 +1285,11 @@ class Window(Gtk.ApplicationWindow):
         saved = profiles.load_all()
         page.append(section("Saved profiles", None))
         lst = vbox(12, "card")
+        imp = Gtk.Button(label="Import…")
+        imp.set_halign(Gtk.Align.START)
+        imp.set_tooltip_text("Adds a profile from a file exported by this app")
+        imp.connect("clicked", lambda *_: self._import_profile())
+        lst.append(imp)
         if not saved:
             lst.append(label("No profiles yet.", "small", "dim"))
         for i, p in enumerate(saved):
@@ -1307,6 +1311,11 @@ class Window(Gtk.ApplicationWindow):
             apply_btn.set_sensitive(ready and not self.profile_busy)
             apply_btn.connect("clicked", lambda *_, p=p: self._apply_profile(iface, p))
             row.append(apply_btn)
+            exp = Gtk.Button(label="Export…")
+            exp.add_css_class("text")
+            exp.set_tooltip_text("Saves this profile to a file you choose")
+            exp.connect("clicked", lambda *_, p=p: self._export_profile(p))
+            row.append(exp)
             bind = Gtk.Button(label="Copy binding")
             bind.add_css_class("text")
             bind.set_tooltip_text("Copies a Hyprland line that applies this profile from a key")
@@ -1349,6 +1358,48 @@ class Window(Gtk.ApplicationWindow):
             profiles.apply(dev, p, handle=self.handle)
             return p
         self._profile_run(iface, job, lambda _r: f"Applied profile “{p.name}”.", applied=True)
+
+    @staticmethod
+    def _json_filter() -> Gio.ListStore:
+        f = Gtk.FileFilter()
+        f.set_name("Profiles (JSON)")
+        f.add_pattern("*.json")
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(f)
+        return store
+
+    def _export_profile(self, p):
+        dlg = Gtk.FileDialog(title=f"Export profile “{p.name}”", initial_name=profiles.file_name(p.name),
+                             filters=self._json_filter())
+
+        def done(d, res):
+            try:
+                f = d.save_finish(res)
+            except GLib.Error:
+                return                          # cancelled
+            try:
+                profiles.export_to(p, f.get_path())
+                self.profile_message = (f"Exported “{p.name}” to {f.get_path()}.", "dim")
+            except (OSError, ValueError) as e:
+                self.profile_message = (f"Couldn't export it: {e}", "error-text")
+            self.render()
+        dlg.save(self, None, done)
+
+    def _import_profile(self):
+        dlg = Gtk.FileDialog(title="Import a profile", filters=self._json_filter())
+
+        def done(d, res):
+            try:
+                f = d.open_finish(res)
+            except GLib.Error:
+                return
+            try:
+                p = profiles.import_from(f.get_path())
+                self.profile_message = (f"Imported profile “{p.name}”. Apply it to write it to the keyboard.", "dim")
+            except (OSError, ValueError) as e:
+                self.profile_message = (f"Couldn't import that file: {e}", "error-text")
+            self.render()
+        dlg.open(self, None, done)
 
     def _delete_profile(self, p):
         try:
@@ -1414,7 +1465,7 @@ class Window(Gtk.ApplicationWindow):
             card.append(label("Connect the keyboard with its USB cable to change its lighting.", "dim"))
             return
         if not iface.access:
-            card.append(label("Horus Control can't open the keyboard yet. The Keyboard tab shows how to "
+            card.append(label("The app can't open the keyboard yet. The Keyboard tab shows how to "
                               "allow it.", "dim"))
             return
 
@@ -1472,7 +1523,7 @@ class Window(Gtk.ApplicationWindow):
         rc = vbox(10, "card")
         if saved:
             rc.append(label("Puts back the effect, brightness and speed the keyboard had before your first "
-                            f"change in Horus Control (saved {saved[0].replace('T', ' at ')}).", "small", "dim"))
+                            f"change in this app (saved {saved[0].replace('T', ' at ')}).", "small", "dim"))
             btn = Gtk.Button(label="Restore")
             btn.set_halign(Gtk.Align.START)
             btn.set_sensitive(not self.light_busy)
@@ -1482,11 +1533,9 @@ class Window(Gtk.ApplicationWindow):
                 lambda st: f"Restored {st.name}."))
             rc.append(btn)
         else:
-            rc.append(label("Before your first change, Horus Control saves the keyboard's effect, brightness "
+            rc.append(label("Before your first change, the app saves the keyboard's effect, brightness "
                             "and speed so you can put them back here.", "small", "dim"))
         page.append(rc)
-        page.append(label("Colour can't be changed yet: it's stored in a part of the keyboard Horus Control "
-                          "can't read yet.", "small", "faint"))
 
     def _colour_section(self, iface) -> Gtk.Widget:
         from .style import SWATCHES
@@ -1590,6 +1639,7 @@ class Window(Gtk.ApplicationWindow):
     def _build_settings(self):
         s = self.app.settings
         page = self.settings_page
+        clear(page)
 
         page.append(section("Appearance", "Changes apply straight away."))
         card = vbox(16, "card")
@@ -1613,14 +1663,70 @@ class Window(Gtk.ApplicationWindow):
         sw.connect("notify::active", lambda w, _p: self.app.change(reduce_motion=w.get_active()))
         row.append(sw)
         card.append(row)
+        card.append(Gtk.Box(css_classes=["divider"]))
+        card.append(self._accent_row())
         page.append(card)
+
+        page.append(section("App launcher", None))
+        lc = vbox(10, "card")
+        row = hbox(12)
+        text = vbox(4)
+        text.set_hexpand(True)
+        text.append(label("Show in the app launcher", "heading"))
+        running = desktop.appimage_path()
+        text.append(label(f"Adds “{desktop.LAUNCHER_NAME}” to your launcher, pointing at this AppImage. It follows "
+                          "the AppImage if you move or rebuild it. Turning it off removes the entry."
+                          if running else "Available when you run the AppImage.", "small", "dim"))
+        row.append(text)
+        lsw = Gtk.Switch(active=s.desktop_entry, valign=Gtk.Align.CENTER, sensitive=bool(running))
+        set_accessible_label(lsw, "Show in the app launcher")
+        lsw.connect("notify::active", lambda w, _p: (self.app.change(desktop_entry=w.get_active()),
+                                                     self.app.sync_launcher()))
+        row.append(lsw)
+        lc.append(row)
+        page.append(lc)
 
         page.append(section("About", None))
         about = vbox(6, "card")
-        about.append(label(f"Horus Control {__version__}", "heading"))
-        about.append(label("A read-only inspector for the Redragon Horus SE K609GG over wired USB. "
-                           "Settings are saved in ~/.config/horus-control/.", "small", "dim"))
+        about.append(label(f"{APP_NAME} {__version__}", "heading"))
+        about.append(label(f"Lighting, key remapping, macros and profiles for the {COMMENT} over wired USB. "
+                           "Not made by Redragon. Settings are saved in ~/.config/horus-control/.", "small", "dim"))
         page.append(about)
+
+    def _accent_row(self) -> Gtk.Widget:
+        from .style import ACCENTS
+        s = self.app.settings
+        box = vbox(8)
+        box.append(label("Accent colour", "heading"))
+        box.append(label("Colours the whole app. Pick one, or make your own.", "small", "dim"))
+        row = hbox(10)
+        presets = {h for _, h in ACCENTS}
+        for name, hexv in ACCENTS:
+            b = Gtk.Button(tooltip_text=name, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            b.add_css_class("swatch")
+            b.add_css_class(f"swatch-{hexv}")
+            if hexv == s.accent:
+                b.add_css_class("current")
+            set_accessible_label(b, f"Accent colour {name}")
+            b.connect("clicked", lambda *_, h=hexv: self._set_accent(h))
+            row.append(b)
+        if s.accent not in presets:
+            b = Gtk.Button(tooltip_text="Custom", halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            b.add_css_class("swatch")
+            b.add_css_class(f"swatch-{s.accent}")
+            b.add_css_class("current")
+            set_accessible_label(b, "Custom accent colour")
+            row.append(b)
+        box.append(row)
+        exp = Gtk.Expander(label="Custom colour")
+        exp.set_child(ColourPicker(tuple(bytes.fromhex(s.accent)), lambda rgb: self._set_accent(bytes(rgb).hex()),
+                                   apply_label="Use this colour"))
+        box.append(exp)
+        return box
+
+    def _set_accent(self, hexv):
+        self.app.change(accent=hexv)
+        GLib.idle_add(lambda: (self._build_settings(), False)[1])
 
     def _group_row(self, title, explanation, options, current, on_change) -> Gtk.Widget:
         row = vbox(8)
@@ -1657,6 +1763,20 @@ class App(Gtk.Application):
         self.desktop_animations = self.gtk_settings.get_property("gtk-enable-animations")
         self._watch_portal()
         self.apply_style()
+        Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(desktop.RESOURCES)
+        Gtk.Window.set_default_icon_name(APP_ID)
+        self.sync_launcher()
+
+    def sync_launcher(self):
+        """Keep (or remove) the launcher entry for the AppImage this was started from."""
+        path = desktop.appimage_path()
+        try:
+            if self.settings.desktop_entry and path:
+                desktop.install(path)
+            elif not self.settings.desktop_entry:
+                desktop.remove()
+        except OSError as e:
+            print(f"horus-control: couldn't update the launcher entry: {e}", file=sys.stderr)
 
     def do_activate(self):
         if not self.window:
@@ -1696,7 +1816,7 @@ class App(Gtk.Application):
     def apply_style(self):
         reduce = self.settings.reduce_motion or not self.desktop_animations
         self.gtk_settings.set_property("gtk-enable-animations", not reduce)
-        css = stylesheet(self.is_dark(), self.settings.size, reduce)
+        css = stylesheet(self.is_dark(), self.settings.size, reduce, self.settings.accent)
         if hasattr(self.provider, "load_from_string"):
             self.provider.load_from_string(css)
         else:

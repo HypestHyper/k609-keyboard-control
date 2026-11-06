@@ -89,3 +89,20 @@ def test_bad_profiles_are_rejected(tmp_path):
 def test_file_names_are_safe():
     assert profiles.file_name("../../etc/passwd") == "etc-passwd.json"
     assert profiles.file_name("Work / Day") == "Work-Day.json"
+
+
+
+def test_export_import(tmp_path):
+    p = profiles.Profile("Work", 1, {e: 0x44 for e in range(1, 0x13)}, "00ff00", {"Caps Lock": 0xE0},
+                         [Macro("ab", [Step(4, True, 30), Step(4, False, 30)], key="Page Down")])
+    store = tmp_path / "store"
+    out = tmp_path / "shared.json"
+    profiles.export_to(p, str(out))
+    first = profiles.import_from(str(out), str(store))
+    second = profiles.import_from(str(out), str(store))
+    assert first.name == "Work" and second.name == "Work 2"
+    assert sorted(x.name for x in profiles.load_all(str(store))) == ["Work", "Work 2"]
+    assert profiles.find("work 2", str(store)).keys == {"Caps Lock": 0xE0}
+    (tmp_path / "bad.json").write_text(json.dumps({"version": 1, "name": "x"}))
+    with pytest.raises(ValueError):
+        profiles.import_from(str(tmp_path / "bad.json"), str(store))

@@ -23,6 +23,8 @@ class Settings:
     size: str = "default"
     reduce_motion: bool = False
     fixed_colour: str = ""            # last Fixed on colour sent, "rrggbb"; the keyboard can't report it
+    desktop_entry: bool = True        # keep a launcher entry for the AppImage in ~/.local/share
+    accent: str = "4d7cff"            # UI accent seed, "rrggbb"
 
     @classmethod
     def from_dict(cls, data) -> "Settings":
@@ -35,6 +37,11 @@ class Settings:
             s.size = data["size"]
         if isinstance(data.get("reduce_motion"), bool):
             s.reduce_motion = data["reduce_motion"]
+        ac = data.get("accent")
+        if isinstance(ac, str) and len(ac) == 6 and all(c in "0123456789abcdef" for c in ac):
+            s.accent = ac
+        if isinstance(data.get("desktop_entry"), bool):
+            s.desktop_entry = data["desktop_entry"]
         fc = data.get("fixed_colour")
         if isinstance(fc, str) and len(fc) == 6 and all(c in "0123456789abcdef" for c in fc):
             s.fixed_colour = fc

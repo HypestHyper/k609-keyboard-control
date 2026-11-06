@@ -5,7 +5,10 @@ from __future__ import annotations
 import colorsys
 import re
 
-SEED = "#4d7cff"   # Horus Control accent: lapis blue
+SEED = "#4d7cff"   # default accent: lapis blue
+# Accent choices (family seeds plus the app's own). Each generates the whole palette.
+ACCENTS = (("Lapis", "4d7cff"), ("Mint", "53dbb0"), ("Sky", "6aa6ff"), ("Lilac", "b38cff"),
+           ("Rose", "ff8fb1"), ("Amber", "ffb35c"), ("Leaf", "9ccc65"))
 SCALES = {"compact": 0.8, "default": 0.9, "large": 1.0}
 # Preset colours for the keyboard's Fixed on effect (true colours, never tinted).
 SWATCHES = (("White", "ffffff"), ("Red", "ff0000"), ("Orange", "ff8000"), ("Yellow", "ffff00"),
@@ -67,7 +70,27 @@ def palette(dark: bool, seed: str = SEED) -> dict[str, str]:
         out[role] = _hex(*colorsys.hls_to_rgb(h, light, s))
     for role, (d, l) in _FIXED.items():
         out[role] = d if dark else l
+    _fit_primary(out, hue, sat, dark)
     return out
+
+
+def _fit_primary(out: dict, hue: float, sat: float, dark: bool) -> None:
+    """Nudge PRIMARY's lightness until text on it and it on cards both reach 4.5:1.
+
+    Pale seeds (mint, leaf) need a darker PRIMARY in the light theme, deep ones (lilac) a lighter
+    one in the dark theme. Contrast is measured, never assumed (family design language, COL).
+    """
+    light = 0.66 if dark else 0.34
+    step = 0.01 if dark else -0.01
+    for _ in range(40):
+        primary = _hex(*colorsys.hls_to_rgb(hue, light, sat))
+        if (contrast(out["ON_PRIMARY"], primary) >= 4.5
+                and contrast(primary, out["SURFACE_CONTAINER"]) >= 4.5
+                and contrast(primary, out["SURFACE_DIM"]) >= 4.5):
+            break
+        light += step
+    out["PRIMARY"] = primary
+    out["PRIMARY_HOVER"] = _hex(*colorsys.hls_to_rgb(hue, min(0.95, max(0.05, light + (0.08 if dark else -0.06))), sat))
 
 
 def luminance(hex_colour: str) -> float:
@@ -195,15 +218,17 @@ def _fpx(scale: float):
     return size
 
 
-def stylesheet(dark: bool, size: str = "default", reduce_motion: bool = False) -> str:
+def stylesheet(dark: bool, size: str = "default", reduce_motion: bool = False, seed: str = SEED) -> str:
     scale = SCALES.get(size, 0.9)
-    colours = "\n".join(f"@define-color {k} {v};" for k, v in palette(dark).items())
+    seed = "#" + seed.lstrip("#")
+    colours = "\n".join(f"@define-color {k} {v};" for k, v in palette(dark, seed).items())
     # Component classes must outrank the theme-proofing resets on box/label.
     css = re.sub(r"(?m)^\.", "window.horus .", _CSS)
     css = re.sub(r"fpx\(([\d.]+)\)", _fpx(scale), css)
     css = re.sub(r"(?<![\w])px\(([\d.]+)\)", _px(scale), css)
+    swatch_colours = {h for _, h in SWATCHES} | {h for _, h in ACCENTS} | {seed.lstrip("#").lower()}
     css += "\n" + "\n".join(f"window.horus button.swatch-{h}, window.horus button.swatch-{h}:hover "
-                              f"{{ background-color: #{h}; }}" for _, h in SWATCHES)
+                              f"{{ background-color: #{h}; }}" for h in sorted(swatch_colours))
     if reduce_motion:
         css += "\n* { transition: none; }\n"
     return colours + "\n" + css

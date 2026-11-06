@@ -140,3 +140,25 @@ def apply(devnode: str, p: Profile, **io) -> None:
     changes = {k.name: p.keys.get(k.name, k.default) for k in keymap.REMAPPABLE if k.name not in macro_keys}
     keymap.remap(devnode, changes, **io)
     macros.apply(devnode, p.macros, **io)
+
+
+def export_to(p: Profile, path: str) -> None:
+    """Write a profile to any file the user chose (same format as the saved profiles)."""
+    validate(p)
+    atomic_write_json(path, p.to_dict())
+
+
+def import_from(path: str, folder: str | None = None) -> Profile:
+    """Read and validate a profile file, then save it; a clashing name gets a number added."""
+    with open(path, encoding="utf-8") as f:
+        try:
+            p = from_dict(json.load(f))
+        except (KeyError, TypeError, AttributeError) as e:
+            raise ValueError("That file isn't a profile from this app.") from e
+    taken = {x.name.lower() for x in load_all(folder)}
+    base, n = p.name, 2
+    while p.name.lower() in taken:
+        p.name = f"{base} {n}"
+        n += 1
+    save(p, folder)
+    return p

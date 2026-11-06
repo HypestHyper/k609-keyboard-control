@@ -56,8 +56,9 @@ PAIRS_UI = [("PRIMARY", "SURFACE_DIM"), ("OUTLINE", "SURFACE_CONTAINER")]  # foc
 
 
 @pytest.mark.parametrize("dark", [True, False])
-def test_palette_contrast(dark):
-    p = style.palette(dark)
+@pytest.mark.parametrize("seed", [h for _, h in style.ACCENTS])
+def test_palette_contrast(dark, seed):
+    p = style.palette(dark, "#" + seed)
     for fg, bg in PAIRS_TEXT:
         assert style.contrast(p[fg], p[bg]) >= 4.5, (fg, bg, dark)
     for fg, bg in PAIRS_UI:
@@ -70,3 +71,18 @@ def test_stylesheet_scales():
     assert "border-radius: 28px" in large and "border-radius: 22px" in compact
     assert "px(" not in large and "fpx(" not in compact
     assert "transition: none" in compact
+
+
+
+def test_launcher_entry(tmp_path, monkeypatch):
+    from horus_control import desktop
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert desktop.install("/home/me/Apps/Keyboard Control.AppImage")
+    text = open(desktop.entry_path()).read()
+    assert "Name=Keyboard Control" in text and "Comment=Redragon Horus SE K609" in text
+    assert 'Exec="/home/me/Apps/Keyboard Control.AppImage"' in text and "Keywords=keyboard;Redragon;" in text
+    assert open(desktop.icon_path(), "rb").read() == open(desktop.ICON_SOURCE, "rb").read()
+    assert not desktop.install("/home/me/Apps/Keyboard Control.AppImage")      # unchanged
+    assert desktop.install("/elsewhere/k.AppImage")                              # follows a move
+    desktop.remove()
+    assert not desktop.installed()
