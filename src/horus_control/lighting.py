@@ -157,13 +157,25 @@ GAP_BEFORE_BLOCK = 0.05
 GAP_AFTER_BLOCK = 0.04
 
 
+# Experimental timing, chosen with HORUS_SAVE_MODE, to investigate a brief LED glitch that the
+# official software doesn't show although the recorded traffic is identical. Same commands only.
+#   official (default): as above.  once: a single save.  slow: as official, with longer pauses.
+SAVE_MODES = ("official", "once", "slow")
+
+
+def save_mode() -> str:
+    mode = os.environ.get("HORUS_SAVE_MODE", "official")
+    return mode if mode in SAVE_MODES else "official"
+
+
 def _save_round(s: Session, payload: bytes, table: bytes | None) -> None:
-    s.pause(GAP_BEFORE_TABLE)
+    k = 5 if save_mode() == "slow" else 1
+    s.pause(GAP_BEFORE_TABLE * k)
     if table is not None:
         s.write_colour_table(table)
-        s.pause(GAP_BEFORE_BLOCK)
+        s.pause(GAP_BEFORE_BLOCK * k)
     s.write_lighting(payload)
-    s.pause(GAP_AFTER_BLOCK)
+    s.pause(GAP_AFTER_BLOCK * k)
 
 
 def _change(devnode: str, *, backup: str | None, colour, change: dict, io: dict) -> State:
@@ -177,10 +189,13 @@ def _change(devnode: str, *, backup: str | None, colour, change: dict, io: dict)
         if table is None and payload[3:BLOCK_LEN] == block[3:BLOCK_LEN]:
             return before
         _save_round(s, payload, table)
+        if save_mode() == "slow":
+            s.pause(0.5)
         after = _read(s)                      # the official software's second round starts with this read
         if _known_fields(after) != _known_fields(payload):
             raise VerifyFailed("The keyboard didn't keep the change.")
-        _save_round(s, build_write(after), table)
+        if save_mode() != "once":
+            _save_round(s, build_write(after), table)
     return parse(after)
 
 

@@ -247,3 +247,19 @@ def test_handle_is_dropped_when_keyboard_disappears():
         lighting.read_state("/dev/x", ioctl=gone, sleep=lambda s: None, handle=handle)
     assert handle.fd is None and oc.closed == 1
     assert not handle.lock.locked()
+
+
+def test_experimental_save_modes(monkeypatch):
+    kb = ColourKeyboard(block(0x01))
+    monkeypatch.setenv("HORUS_SAVE_MODE", "once")
+    lighting.apply("/dev/x", effect=0x03, colour=(1, 2, 3), **kb.io())
+    assert kb.sequence == ["0583c6", "060000", "0608c8", "0603c6", "0583c6", "060000"]
+    kb = ColourKeyboard(block(0x01))
+    pauses = []
+    io = kb.io(); io["sleep"] = pauses.append
+    monkeypatch.setenv("HORUS_SAVE_MODE", "slow")
+    lighting.apply("/dev/x", effect=0x03, colour=(1, 2, 3), **io)
+    assert kb.sequence == ["0583c6", "060000", "0608c8", "0603c6"] * 2
+    assert pauses == [0.02, 0.1, 0.25, 0.2, 0.5, 0.02, 0.1, 0.25, 0.2]
+    monkeypatch.setenv("HORUS_SAVE_MODE", "nonsense")
+    assert lighting.save_mode() == "official"
