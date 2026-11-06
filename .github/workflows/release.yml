@@ -2,13 +2,14 @@ name: Release
 
 # Builds the self-contained AppImage on Ubuntu 22.04, starts it on several distros, then attaches it
 # and the notes from that version's section in CHANGELOG.md to a GitHub release, creating the tag.
-# Runs when a commit on main changes the version in src/k609_control/__init__.py (skipped if that
+# Runs when a commit on main changes the version in src/k609_control/__init__.py or the build files
+# (skipped if that
 # version already has a release), when a tag like v0.12.0 is pushed, or by hand (Actions tab,
 # Release, Run workflow), which rebuilds the current version and replaces its AppImage and notes.
 on:
   push:
     branches: [main]
-    paths: ["src/k609_control/__init__.py"]
+    paths: ["src/k609_control/__init__.py", ".github/workflows/release.yml", "tools/**", "packaging/**"]
     tags: ["v*"]
   workflow_dispatch:
 
