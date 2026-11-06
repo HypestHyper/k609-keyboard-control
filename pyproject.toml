@@ -1,0 +1,13 @@
+[project]
+name = "horus-control"
+version = "0.1.0"
+description = "Read-only inspector for the Redragon Horus SE K609GG over wired USB"
+requires-python = ">=3.11"
+# PyGObject + GTK 4 come from the system (Arch: python-gobject, gtk4). No other dependencies.
+
+[project.scripts]
+horus-control = "horus_control.__main__:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

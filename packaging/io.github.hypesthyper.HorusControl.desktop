@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Horus Control
+Comment=Inspect the Redragon Horus SE K609GG keyboard
+Exec=horus-control
+Icon=horus-control
+Categories=Settings;HardwareSettings;
+Terminal=false
+StartupWMClass=io.github.hypesthyper.HorusControl

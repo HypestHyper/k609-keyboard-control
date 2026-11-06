@@ -1,0 +1,226 @@
+"""Read-only access to Linux hidraw: report-descriptor parsing and GET_FEATURE.
+
+No function in this module writes to a device. There is deliberately no
+SET_FEATURE, output-report or write() call anywhere in Horus Control.
+"""
+
+from __future__ import annotations
+
+import errno
+import fcntl
+import os
+from dataclasses import dataclass
+
+# --- Report descriptor parsing -------------------------------------------------
+
+VENDOR_USAGE_PAGE_MIN = 0xFF00
+
+_MAIN_INPUT, _MAIN_OUTPUT, _MAIN_COLLECTION, _MAIN_FEATURE, _MAIN_END = 0x8, 0x9, 0xA, 0xB, 0xC
+
+
+@dataclass(frozen=True)
+class Report:
+    kind: str          # "input", "output" or "feature"
+    report_id: int
+    bits: int
+
+    @property
+    def payload_len(self) -> int:
+        """Payload bytes, excluding the report-ID byte."""
+        return (self.bits + 7) // 8
+
+    @property
+    def buffer_len(self) -> int:
+        """Bytes to pass to hidraw: one report-ID byte plus the payload."""
+        return self.payload_len + 1
+
+
+@dataclass(frozen=True)
+class Collection:
+    usage_page: int
+    usage: int
+    report_ids: tuple[int, ...]
+
+    @property
+    def is_vendor(self) -> bool:
+        return self.usage_page >= VENDOR_USAGE_PAGE_MIN
+
+
+@dataclass(frozen=True)
+class Descriptor:
+    reports: tuple[Report, ...]
+    collections: tuple[Collection, ...]
+
+    def feature_reports(self) -> tuple[Report, ...]:
+        return tuple(r for r in self.reports if r.kind == "feature")
+
+    @property
+    def has_vendor_collection(self) -> bool:
+        return any(c.is_vendor for c in self.collections)
+
+
+class DescriptorError(ValueError):
+    pass
+
+
+def parse_descriptor(data: bytes) -> Descriptor:
+    """Parse the parts of a HID report descriptor needed to size reports.
+
+    Tracks report sizes per (kind, report ID) and the usage page/usage of each
+    top-level application collection.
+    """
+    sizes: dict[tuple[str, int], int] = {}
+    order: list[tuple[str, int]] = []
+    collections: list[list] = []          # [usage_page, usage, set(report_ids)]
+    glob = {"page": 0, "size": 0, "count": 0, "id": 0}
+    stack: list[dict] = []
+    usage = 0
+    depth = 0
+    i = 0
+    n = len(data)
+    while i < n:
+        prefix = data[i]
+        if prefix == 0xFE:                # long item: skip
+            if i + 2 >= n:
+                raise DescriptorError("truncated long item")
+            i += 3 + data[i + 1]
+            continue
+        size = (0, 1, 2, 4)[prefix & 0x3]
+        kind = (prefix >> 2) & 0x3
+        tag = prefix >> 4
+        if i + 1 + size > n:
+            raise DescriptorError(f"truncated item at byte {i}")
+        value = int.from_bytes(data[i + 1:i + 1 + size], "little")
+        i += 1 + size
+
+        if kind == 0:                     # main
+            if tag in (_MAIN_INPUT, _MAIN_OUTPUT, _MAIN_FEATURE):
+                name = {_MAIN_INPUT: "input", _MAIN_OUTPUT: "output", _MAIN_FEATURE: "feature"}[tag]
+                key = (name, glob["id"])
+                if key not in sizes:
+                    sizes[key] = 0
+                    order.append(key)
+                sizes[key] += glob["size"] * glob["count"]
+                if collections and depth > 0:
+                    collections[-1][2].add(glob["id"])
+            elif tag == _MAIN_COLLECTION:
+                if depth == 0:
+                    # Usage may carry its own page in a 4-byte item (page << 16 | id).
+                    page = usage >> 16 if usage > 0xFFFF else glob["page"]
+                    collections.append([page, usage & 0xFFFF, set()])
+                depth += 1
+            elif tag == _MAIN_END:
+                depth = max(0, depth - 1)
+            usage = 0
+        elif kind == 1:                   # global
+            if tag == 0x0:
+                glob["page"] = value
+            elif tag == 0x7:
+                glob["size"] = value
+            elif tag == 0x8:
+                glob["id"] = value
+            elif tag == 0x9:
+                glob["count"] = value
+            elif tag == 0xA:
+                stack.append(dict(glob))
+            elif tag == 0xB:
+                if not stack:
+                    raise DescriptorError("pop without push")
+                glob = stack.pop()
+        elif kind == 2:                   # local
+            if tag == 0x0 and usage == 0:
+                usage = value
+            elif tag == 0x1 and usage == 0:  # usage minimum stands in for usage
+                usage = value
+
+    reports = tuple(Report(k, rid, sizes[(k, rid)]) for k, rid in order)
+    cols = tuple(Collection(p, u, tuple(sorted(ids))) for p, u, ids in collections)
+    return Descriptor(reports, cols)
+
+
+# --- GET_FEATURE through hidraw -------------------------------------------------
+
+def _ioc(direction: int, type_: int, nr: int, size: int) -> int:
+    return (direction << 30) | (size << 16) | (type_ << 8) | nr
+
+
+def hidiocgfeature(length: int) -> int:
+    """HIDIOCGFEATURE(len) from linux/hidraw.h: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len)."""
+    if not 0 < length < (1 << 14):
+        raise ValueError("feature buffer length out of range")
+    return _ioc(3, ord("H"), 0x07, length)
+
+
+class AccessDenied(Exception):
+    pass
+
+
+class DeviceGone(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class FeatureResult:
+    report_id: int
+    expected_len: int     # buffer length including the report-ID byte
+    data: bytes           # bytes the kernel returned (report-ID byte first)
+    problem: str = ""     # empty when the reply looks well-formed
+
+    @property
+    def ok(self) -> bool:
+        return not self.problem
+
+
+def check_reply(report_id: int, expected_len: int, data: bytes) -> str:
+    if not data:
+        return "The keyboard returned no data."
+    if data[0] != report_id:
+        return f"The reply starts with report ID 0x{data[0]:02x}, not 0x{report_id:02x}."
+    if len(data) < expected_len:
+        return f"Short reply: {len(data)} of {expected_len} bytes."
+    return ""
+
+
+def read_feature_reports(devnode: str, reports, *, opener=os.open, ioctl=fcntl.ioctl,
+                         closer=os.close) -> list[FeatureResult]:
+    """Ask the device for each feature report with GET_FEATURE.
+
+    The device node is opened only for the duration of the call and nothing is
+    read from or written to its input/output stream, so no keystrokes are seen.
+    """
+    try:
+        fd = opener(devnode, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EPERM):
+            raise AccessDenied(devnode) from e
+        if e.errno in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
+            raise DeviceGone(devnode) from e
+        raise
+    results = []
+    try:
+        for rep in reports:
+            buf = bytearray(rep.buffer_len)
+            buf[0] = rep.report_id
+            try:
+                n = ioctl(fd, hidiocgfeature(len(buf)), buf, True)
+            except OSError as e:
+                if e.errno in (errno.ENODEV, errno.ENXIO, errno.ENOENT):
+                    raise DeviceGone(devnode) from e
+                results.append(FeatureResult(rep.report_id, rep.buffer_len, b"",
+                                             f"Read failed: {os.strerror(e.errno or 0)}."))
+                continue
+            n = n if isinstance(n, int) and n >= 0 else 0
+            data = bytes(buf[:min(n, len(buf))])
+            results.append(FeatureResult(rep.report_id, rep.buffer_len, data,
+                                         check_reply(rep.report_id, rep.buffer_len, data)))
+    finally:
+        closer(fd)
+    return results
+
+
+def hexdump(data: bytes, width: int = 16) -> str:
+    lines = []
+    for off in range(0, len(data), width):
+        chunk = data[off:off + width]
+        lines.append(f"{off:04x}  {' '.join(f'{b:02x}' for b in chunk)}")
+    return "\n".join(lines)
