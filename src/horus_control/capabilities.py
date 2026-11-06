@@ -27,7 +27,9 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("lighting_colour", "Fixed on colour", Status.HARDWARE,
                "Bytes 29–31 of the colour table, from three recordings of Redragon's software. "
                "Other effects' colours aren't decoded."),
-    Capability("remapping", "Key remapping", Status.UNKNOWN, "No protocol evidence yet."),
+    Capability("remapping", "Key remapping", Status.HARDWARE,
+               "Normal keys to normal keys. Key positions decoded from the key map and two "
+               "recorded remaps. Media keys, modifiers and Fn aren't supported yet."),
     Capability("macros", "Macros", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("media_keys", "Media keys", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("onboard_profiles", "On-board profiles", Status.UNKNOWN, "No protocol evidence yet."),

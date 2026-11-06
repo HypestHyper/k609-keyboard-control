@@ -6,7 +6,8 @@
   `hidraw.ALLOWED_COMMANDS` (`05 83 c6 00 00 00` lighting, `05 84 d8 00 00 00` key map), plus these writes,
   each copied from captures of the official software: the lighting block
   save (`06 03 c6`, only decoded bytes changed) and the colour table (`06 08 c8`, must equal
-  `colour_table.hex` except bytes 29–31). Anything new needs the same capture evidence and user
+  `colour_table.hex` except bytes 29–31), and the key map save (`06 04 d8 00 40`, built only by
+  `keymap.py`, normal-key codes only). Anything new needs the same capture evidence and user
   approval. Gate new features through
   `capabilities.require_usable()`; keep UI code away from raw bytes.
 - Never open interface 0 or read input reports (no keystrokes).

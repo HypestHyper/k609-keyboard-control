@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import __version__, capabilities, lighting, settings as settings_mod  # noqa: E402
+from . import __version__, capabilities, keymap, lighting, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
@@ -165,6 +165,7 @@ class Window(Gtk.ApplicationWindow):
         for i, (name, title, icon_name) in enumerate((
                 ("keyboard", "Keyboard", "input-keyboard-symbolic"),
                 ("lighting", "Lighting", "display-brightness-symbolic"),
+                ("keys", "Keys", "input-keyboard-symbolic"),
                 ("settings", "Settings", "preferences-system-symbolic"))):
             btn = Gtk.ToggleButton(tooltip_text=f"{title} (Alt+{i + 1})")
             inner = hbox(8)
@@ -182,6 +183,11 @@ class Window(Gtk.ApplicationWindow):
 
         self.keyboard_page = self._page("keyboard")
         self.lighting_page = self._page("lighting")
+        self.keys_page = self._page("keys")
+        self.keys_state = None                  # (devnode, {key name: code}) once loaded
+        self.keys_busy = False
+        self.keys_message = ("", "dim")
+        self.keys_selected = keymap.REMAPPABLE[0].name
         self.light_state = None                 # (devnode, lighting.State) once loaded
         self.handle = Handle()                  # kept open between operations, like the official software
         self.connect("close-request", lambda *_: (self.handle.close(), False)[1])
@@ -281,6 +287,7 @@ class Window(Gtk.ApplicationWindow):
         kb = self.current()
         iface = kb.config_interface if kb else None
         self.render_lighting(iface)
+        self.render_keys(iface)
         clear(self.status_holder)
         if not self.keyboards:
             self.status_holder.append(chip("Not found", "neutral", "dialog-information-symbolic"))
@@ -526,7 +533,8 @@ class Window(Gtk.ApplicationWindow):
             text.append(label(cap.evidence, "small", "dim"))
             row.append(text)
             usable = cap.status in (capabilities.Status.HARDWARE, capabilities.Status.HOST)
-            c = chip("On the Lighting tab", "ok") if usable else chip("Not yet verified", "neutral")
+            where = "On the Keys tab" if cap.key == "remapping" else "On the Lighting tab"
+            c = chip(where, "ok") if usable else chip("Not yet verified", "neutral")
             c.set_valign(Gtk.Align.CENTER)
             row.append(c)
             card.append(row)
@@ -640,6 +648,148 @@ class Window(Gtk.ApplicationWindow):
             pass  # GTK older than 4.14
 
     # --- settings page -------------------------------------------------------
+
+    # --- keys tab ------------------------------------------------------------------
+
+    def render_keys(self, iface):
+        page = self.keys_page
+        clear(page)
+        if self.keys_state and (iface is None or self.keys_state[0] != iface.devnode):
+            self.keys_state = None
+        page.append(section("Keys", "Remaps keys on the keyboard itself, so it works on any computer. "
+                                    "Changes are saved straight away. Close Redragon's software first."))
+        card = vbox(14, "card")
+        page.append(card)
+        if iface is None or not iface.access:
+            card.append(label("Connect the keyboard (and allow access on the Keyboard tab) to remap keys.", "dim"))
+            return
+        if self.keys_state is None:
+            card.append(label("Read the current key layout from the keyboard.", "small", "dim"))
+            load = Gtk.Button(label="Reading…" if self.keys_busy else "Load keys")
+            load.add_css_class("filled")
+            load.set_halign(Gtk.Align.START)
+            load.set_sensitive(not self.keys_busy)
+            load.connect("clicked", lambda *_: self._keys_run(
+                lambda: keymap.read(iface.devnode, handle=self.handle), lambda cur: ""))
+            card.append(load)
+        else:
+            cur = self.keys_state[1]
+            names = [k.name for k in keymap.REMAPPABLE]
+            codes = list(keymap.TARGETS)
+            card.append(label("Remap a key", "heading"))
+            row = hbox(10)
+            key_dd = Gtk.DropDown.new_from_strings(names)
+            key_dd.set_selected(names.index(self.keys_selected))
+            set_accessible_label(key_dd, "Key to remap")
+            row.append(key_dd)
+            row.append(label("sends", "dim", wrap=False))
+            target_dd = Gtk.DropDown.new_from_strings([keymap.TARGETS[c] for c in codes])
+            target_dd.set_selected(codes.index(cur[self.keys_selected]) if cur[self.keys_selected] in codes else 0)
+            set_accessible_label(target_dd, "What the key sends")
+            row.append(target_dd)
+            apply_btn = Gtk.Button(label="Remap")
+            apply_btn.add_css_class("filled")
+            row.append(apply_btn)
+            for w in (key_dd, target_dd, apply_btn):
+                w.set_sensitive(not self.keys_busy)
+
+            def key_changed(dd, _p):
+                self.keys_selected = names[dd.get_selected()]
+                c = cur[self.keys_selected]
+                target_dd.set_selected(codes.index(c) if c in codes else 0)
+            key_dd.connect("notify::selected", key_changed)
+
+            def do_remap(*_):
+                name = names[key_dd.get_selected()]
+                code = codes[target_dd.get_selected()]
+                self.keys_selected = name
+                if cur.get(name) == code:
+                    return
+                self._keys_run(lambda: keymap.remap(iface.devnode, {name: code}, handle=self.handle),
+                               lambda now: f"{name} now sends {keymap.TARGETS[code]}.")
+            apply_btn.connect("clicked", do_remap)
+            card.append(row)
+            card.append(label("Modifiers (Shift, Ctrl, Alt, Super), Fn and media keys can't be remapped yet.",
+                              "small", "faint"))
+
+            card.append(Gtk.Box(css_classes=["divider"]))
+            card.append(label("Remapped keys", "heading"))
+            changed = [k for k in keymap.REMAPPABLE if cur[k.name] != k.default]
+            if not changed:
+                card.append(label("No keys are remapped.", "small", "dim"))
+            for k in changed:
+                r = hbox(10)
+                sends = keymap.TARGETS.get(cur[k.name], f"code 0x{cur[k.name]:02x}")
+                text = label(f"{k.name}  →  {sends}")
+                text.set_hexpand(True)
+                text.set_valign(Gtk.Align.CENTER)
+                r.append(text)
+                undo = Gtk.Button(label="Reset")
+                undo.add_css_class("text")
+                undo.set_tooltip_text(f"Makes {k.name} type {k.name} again")
+                set_accessible_label(undo, f"Reset {k.name}")
+                undo.set_sensitive(not self.keys_busy)
+                undo.connect("clicked", lambda *_, key=k: self._keys_run(
+                    lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
+                    lambda now, key=key: f"Reset {key.name}."))
+                r.append(undo)
+                card.append(r)
+
+        text, kind = self.keys_message
+        if text:
+            card.append(label(text, "small", kind))
+
+        if self.keys_state is not None:
+            page.append(section("Reset all keys", None))
+            rc = vbox(10, "card")
+            rc.append(label("Makes every key type what's printed on it again. Works with the mouse alone, so "
+                            "you can always undo a remap that gets in the way.", "small", "dim"))
+            btn = Gtk.Button(label="Reset all keys")
+            btn.set_halign(Gtk.Align.START)
+            btn.set_sensitive(not self.keys_busy)
+            btn.connect("clicked", lambda *_: self._keys_run(
+                lambda: keymap.reset_all(iface.devnode, handle=self.handle),
+                lambda now: "All keys are back to default."))
+            rc.append(btn)
+            page.append(rc)
+
+    def _keys_run(self, job, describe):
+        kb = self.current()
+        iface = kb.config_interface if kb else None
+        if iface is None or self.keys_busy:
+            return
+        self.keys_busy = True
+        self.keys_message = ("", "dim")
+        GLib.idle_add(lambda: (self.render(), False)[1])
+        devnode = iface.devnode
+
+        def work():
+            try:
+                cur = job()
+                result = (cur, (describe(cur), "dim"))
+            except keymap.VerifyFailed:
+                result = (None, ("The keyboard didn't keep the change. Load the keys again to see what it "
+                                 "has now.", "error-text"))
+            except keymap.UnexpectedKeymap as e:
+                result = (None, (f"The key map doesn't look as expected, so nothing was changed. {e}",
+                                 "error-text"))
+            except AccessDenied:
+                result = (None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+            except DeviceGone:
+                result = (None, ("The keyboard was disconnected.", "error-text"))
+            except (WriteFailed, OSError) as e:
+                result = (None, (f"Couldn't talk to the keyboard: {e}. Load the keys again to check them.",
+                                 "error-text"))
+            GLib.idle_add(self._keys_done, devnode, result)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _keys_done(self, devnode, result):
+        self.keys_busy = False
+        cur, self.keys_message = result
+        self.keys_state = (devnode, cur) if cur else None
+        self.render()
+        self.say(self.keys_message[0])
+        return False
 
     # --- lighting tab ------------------------------------------------------------
 

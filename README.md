@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: v0.6.** It finds the keyboard, picks its configuration interface
+**Status: v0.7.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.6.0-x86_64.AppImage
+./dist/Horus_Control-0.7.0-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -102,13 +102,22 @@ Decoded layout of the lighting block (byte offsets include the 3-byte header):
 | 21 | Effect: `00` Off, `01`–`12` effects, `15` Self define |
 | 39 + 2 × (effect − 1) | That effect's speed (high digit) and brightness (low digit), 0–4 each |
 
-## Key map (read only so far)
+## Keys tab (key remapping)
 
-`05 84 d8 00 00 00` then GET `0x06` returns the key map (starts `06 84 d8`): an 8-byte header, then
-256 entries of 4 bytes (type, two unknown bytes, USB key code). Types seen: `00`/`02` keys,
-`06` modifiers, `04` media keys, `0e` Fn functions. The official software saves it with
-`06 04 d8 00 40 …` (one save, no repeat). Confirmed: Caps Lock is entry 143. The rest of the
-layout isn't mapped yet; Horus Control doesn't write the key map.
+`05 84 d8 00 00 00` then GET `0x06` returns the key map (starts `06 84 d8 00 84`): an 8-byte header,
+then 256 entries of 4 bytes (type, two zero bytes, USB key code). Types: `00` normal key, `02`
+pointer, `04` media key, `06` modifier, `0e` Fn function, `20` Fn key.
+
+Each key's entry is its key number from Redragon's `Cfg.ini`; if that entry is a pointer (`02`),
+the key's real entry is its code + 132. This places all 66 non-Fn keys on an entry holding their
+default code, and matches the two remaps recorded from Redragon's software (Caps Lock = 143,
+Esc = 147). Saves use `06 04 d8 00 40 00 00 00` + the map, once, then Horus Control reads it back
+to check. Horus Control's saves for the recorded remap and reset are byte-for-byte identical to
+Redragon's.
+
+Supported: normal keys to normal key codes (letters, numbers, punctuation, F1–F24, navigation,
+editing keys). Not yet: modifiers, media keys, Fn. **Reset all keys** restores every key's
+default code and works with the mouse alone.
 
 ## Finding what each setting does
 
