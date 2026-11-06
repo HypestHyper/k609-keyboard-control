@@ -1,9 +1,11 @@
 """Linux hidraw access: report-descriptor parsing, GET_FEATURE and one read command.
 
-SET_FEATURE is sent in exactly two shapes, both copied from a USB capture of the
+SET_FEATURE is sent in exactly three shapes, all copied from USB captures of the
 official Redragon software: a command from ALLOWED_COMMANDS on report 0x05 (the
-read request), and the lighting block saved back on report 0x06, checked by
-is_lighting_write(). There is no output-report or write() call anywhere.
+read request); the lighting block saved back on report 0x06, checked by
+is_lighting_write(); and the colour table on report 0x06, which must equal the
+recorded table except for the Fixed on colour (is_colour_table_write()).
+There is no output-report or write() call anywhere.
 """
 
 from __future__ import annotations
@@ -232,6 +234,30 @@ def is_lighting_write(buf: bytes) -> bool:
             and buf[14:16] == b"\x5a\xa5" and not any(buf[BLOCK_LEN:]))
 
 
+_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "colour_table.hex")
+FIXED_COLOUR = slice(29, 32)          # red, green, blue of the Fixed on colour in the colour table
+_template_cache: bytes | None = None
+
+
+def colour_table_template() -> bytes:
+    """The colour table exactly as the official software sent it (recorded 2026-11-06),
+    with the Fixed on colour set to 00 00 00."""
+    global _template_cache
+    if _template_cache is None:
+        with open(_TEMPLATE_PATH, encoding="ascii") as f:
+            data = bytes.fromhex(f.read().strip())
+        if not data.startswith(bytes.fromhex("0608c8")) or len(data) > BLOCK_BUFFER_LEN:
+            raise ValueError("bad colour table template")
+        _template_cache = data + bytes(BLOCK_BUFFER_LEN - len(data))
+    return _template_cache
+
+
+def is_colour_table_write(buf: bytes) -> bool:
+    t = colour_table_template()
+    return (len(buf) == BLOCK_BUFFER_LEN and buf[:FIXED_COLOUR.start] == t[:FIXED_COLOUR.start]
+            and buf[FIXED_COLOUR.stop:] == t[FIXED_COLOUR.stop:])
+
+
 def _lighting_problem(data: bytes) -> str:
     if not data.startswith(LIGHTING_REPLY_PREFIX):
         return "The reply doesn't start with 06 83 c6, so it isn't the lighting block."
@@ -284,6 +310,17 @@ class Session:
             self._gone(e)
             raise WriteFailed(os.strerror(e.errno or 0)) from e
         self._sleep(0.1)
+
+    def write_colour_table(self, payload: bytes) -> None:
+        if not is_colour_table_write(payload):
+            raise ValueError("not the recorded colour table")
+        buf = bytearray(payload)
+        try:
+            self._ioctl(self.fd, hidiocsfeature(len(buf)), buf, True)
+        except OSError as e:
+            self._gone(e)
+            raise WriteFailed(os.strerror(e.errno or 0)) from e
+        self._sleep(0.15)
 
 
 def read_lighting_block(devnode: str, **io) -> FeatureResult:

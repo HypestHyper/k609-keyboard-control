@@ -24,8 +24,9 @@ class Capability:
 CAPABILITIES: tuple[Capability, ...] = (
     Capability("lighting", "Effect, brightness and speed", Status.HARDWARE,
                "Decoded from the lighting block; saved with the same command as Redragon's software."),
-    Capability("lighting_colour", "Colour", Status.UNKNOWN,
-               "Not in the lighting block. Stored in a table Horus Control can't read yet."),
+    Capability("lighting_colour", "Fixed on colour", Status.HARDWARE,
+               "Bytes 29–31 of the colour table, from three recordings of Redragon's software. "
+               "Other effects' colours aren't decoded."),
     Capability("remapping", "Key remapping", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("macros", "Macros", Status.UNKNOWN, "No protocol evidence yet."),
     Capability("media_keys", "Media keys", Status.UNKNOWN, "No protocol evidence yet."),

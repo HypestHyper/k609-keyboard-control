@@ -22,6 +22,7 @@ class Settings:
     theme: str = "system"
     size: str = "default"
     reduce_motion: bool = False
+    fixed_colour: str = ""            # last Fixed on colour sent, "rrggbb"; the keyboard can't report it
 
     @classmethod
     def from_dict(cls, data) -> "Settings":
@@ -34,6 +35,9 @@ class Settings:
             s.size = data["size"]
         if isinstance(data.get("reduce_motion"), bool):
             s.reduce_motion = data["reduce_motion"]
+        fc = data.get("fixed_colour")
+        if isinstance(fc, str) and len(fc) == 6 and all(c in "0123456789abcdef" for c in fc):
+            s.fixed_colour = fc
         return s
 
     def to_dict(self) -> dict:

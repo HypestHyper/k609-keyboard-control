@@ -1,7 +1,9 @@
 """K609GG lighting: effect, brightness and speed.
 
 Decoded on 2026-11-06 from the lighting block, by changing one setting at a time in the
-official software and reading the block back (see README). Colour is not in this block.
+official software and reading the block back (see README). The Fixed on colour is not in this
+block: it is bytes 29-31 (red, green, blue) of a separate colour table that the keyboard can't
+report back, found from three USB recordings of the official software.
 """
 
 from __future__ import annotations
@@ -12,7 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from . import capabilities
-from .hidraw import BLOCK_BUFFER_LEN, BLOCK_LEN, LIGHTING_REPLY_PREFIX, Session
+from .hidraw import (BLOCK_BUFFER_LEN, BLOCK_LEN, FIXED_COLOUR, LIGHTING_REPLY_PREFIX, Session,
+                     colour_table_template)
 from .settings import atomic_write_json, config_dir
 
 CUSTOM_BYTE = 20
@@ -170,3 +173,38 @@ def restore(devnode: str, backup: str, **io) -> State:
         raise FileNotFoundError(backup)
     _, effect, levels = saved
     return apply(devnode, effect=effect, levels=levels, **io)
+
+
+def parse_hex_colour(text: str) -> tuple[int, int, int]:
+    t = text.strip().lstrip("#")
+    if len(t) != 6:
+        raise ValueError("Use six hex digits, like ff8800.")
+    try:
+        v = bytes.fromhex(t)
+    except ValueError:
+        raise ValueError("Use six hex digits, like ff8800.") from None
+    return v[0], v[1], v[2]
+
+
+def build_colour_table(rgb: tuple[int, int, int]) -> bytes:
+    if len(rgb) != 3 or any(not 0 <= c <= 255 for c in rgb):
+        raise ValueError("colour out of range")
+    t = bytearray(colour_table_template())
+    t[FIXED_COLOUR] = bytes(rgb)
+    return bytes(t)
+
+
+def set_fixed_colour(devnode: str, rgb: tuple[int, int, int], **io) -> State:
+    """Send the colour table with a new Fixed on colour, then save the lighting block unchanged,
+    in the same order as the official software. The colour itself can't be read back."""
+    capabilities.require_usable("lighting_colour")
+    table = build_colour_table(rgb)
+    with Session(devnode, **io) as s:
+        block = _read(s)
+        parse(block)
+        s.write_colour_table(table)
+        s.write_lighting(build_write(block))
+        after = _read(s)
+    if _known_fields(after) != _known_fields(block):
+        raise VerifyFailed("The lighting settings changed unexpectedly while sending the colour.")
+    return parse(after)

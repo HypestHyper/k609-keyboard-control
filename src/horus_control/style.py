@@ -7,6 +7,10 @@ import re
 
 SEED = "#4d7cff"   # Horus Control accent: lapis blue
 SCALES = {"compact": 0.8, "default": 0.9, "large": 1.0}
+# Preset colours for the keyboard's Fixed on effect (true colours, never tinted).
+SWATCHES = (("White", "ffffff"), ("Red", "ff0000"), ("Orange", "ff8000"), ("Yellow", "ffff00"),
+            ("Green", "00ff00"), ("Cyan", "00ffff"), ("Blue", "0000ff"), ("Purple", "8000ff"),
+            ("Pink", "ff00ff"))
 
 # role: (sat, lightness) for dark, then light. "s" = seed saturation, "s.8" = seed sat x 0.8.
 # "t" marks the tertiary hue (+0.17).
@@ -112,6 +116,11 @@ window.horus button.text:hover { background-color: alpha(@ON_SURFACE, 0.08); }
 window.horus button.circle { min-width: px(40)px; padding: 0; border-radius: px(20)px; }
 window.horus button.circle:active { border-radius: px(12)px; }
 
+window.horus button.swatch { min-width: px(40)px; min-height: px(40)px; padding: 0; border-radius: px(20)px; border: 2px solid @OUTLINE_VARIANT; }
+window.horus button.swatch:active { border-radius: px(12)px; }
+window.horus button.swatch.current { border-radius: px(12)px; outline: 3px solid @PRIMARY; outline-offset: 2px; }
+.colour-entry { font-family: monospace; }
+
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }
 .tabbar button { background-color: transparent; color: @ON_SURFACE_VARIANT; }
 .tabbar button:hover { background-color: alpha(@ON_SURFACE, 0.08); }
@@ -175,6 +184,8 @@ def stylesheet(dark: bool, size: str = "default", reduce_motion: bool = False) -
     css = re.sub(r"(?m)^\.", "window.horus .", _CSS)
     css = re.sub(r"fpx\(([\d.]+)\)", _fpx(scale), css)
     css = re.sub(r"(?<![\w])px\(([\d.]+)\)", _px(scale), css)
+    css += "\n" + "\n".join(f"window.horus button.swatch-{h}, window.horus button.swatch-{h}:hover "
+                              f"{{ background-color: #{h}; }}" for _, h in SWATCHES)
     if reduce_motion:
         css += "\n* { transition: none; }\n"
     return colours + "\n" + css

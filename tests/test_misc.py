@@ -7,7 +7,7 @@ from horus_control import capabilities, settings, style
 
 def test_unknown_capabilities_cannot_run():
     for cap in capabilities.CAPABILITIES:
-        if cap.key == "lighting":
+        if cap.key in ("lighting", "lighting_colour"):
             assert cap.status == capabilities.Status.HARDWARE
             capabilities.require_usable(cap.key)
             continue

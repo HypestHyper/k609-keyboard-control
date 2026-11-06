@@ -654,6 +654,9 @@ class Window(Gtk.ApplicationWindow):
             if st.effect == lighting.SELF_DEFINE:
                 effect_box.append(label("Shows the per-key colours set in Redragon's software.", "small", "dim"))
             card.append(effect_box)
+            if st.effect == 0x01:
+                card.append(Gtk.Box(css_classes=["divider"]))
+                card.append(self._colour_section(iface))
 
             levels = [(str(i), str(i)) for i in range(lighting.MAX_LEVEL + 1)]
             if st.brightness is not None:
@@ -694,6 +697,58 @@ class Window(Gtk.ApplicationWindow):
         page.append(rc)
         page.append(label("Colour can't be changed yet: it's stored in a part of the keyboard Horus Control "
                           "can't read yet.", "small", "faint"))
+
+    def _colour_section(self, iface) -> Gtk.Widget:
+        from .style import SWATCHES
+        box = vbox(10)
+        box.append(label("Colour", "heading"))
+        last = self.app.settings.fixed_colour
+        box.append(label("The keyboard can't report its colour, so check the keys after you pick one. "
+                         + (f"Last sent from here: #{last}." if last else ""), "small", "dim"))
+        swatches = hbox(10)
+        for name, hexv in SWATCHES:
+            b = Gtk.Button(tooltip_text=name, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            b.add_css_class("swatch")
+            b.add_css_class(f"swatch-{hexv}")
+            if hexv == last:
+                b.add_css_class("current")
+            set_accessible_label(b, f"Set Fixed on colour to {name.lower()}")
+            b.set_sensitive(not self.light_busy)
+            b.connect("clicked", lambda *_, h=hexv, n=name: self._send_colour(iface, h, n.lower()))
+            swatches.append(b)
+        box.append(swatches)
+        row = hbox(10)
+        entry = Gtk.Entry(placeholder_text="Hex, like ff8800", max_length=7, width_chars=12)
+        entry.add_css_class("colour-entry")
+        set_accessible_label(entry, "Fixed on colour as a hex code")
+        apply_btn = Gtk.Button(label="Apply colour")
+        apply_btn.set_sensitive(not self.light_busy)
+
+        def from_entry(*_):
+            try:
+                rgb = lighting.parse_hex_colour(entry.get_text())
+            except ValueError as e:
+                self.light_message = (str(e), "error-text")
+                self.render()
+                return
+            self._send_colour(iface, bytes(rgb).hex(), "#" + bytes(rgb).hex())
+        entry.connect("activate", from_entry)
+        apply_btn.connect("clicked", from_entry)
+        row.append(entry)
+        row.append(apply_btn)
+        box.append(row)
+        return box
+
+    def _send_colour(self, iface, hexv, name):
+        if self.light_busy:
+            return
+        rgb = tuple(bytes.fromhex(hexv))
+
+        def job():
+            st = lighting.set_fixed_colour(iface.devnode, rgb)
+            GLib.idle_add(lambda: (self.app.change(fixed_colour=hexv), False)[1])
+            return st
+        self._light_run(job, lambda st: f"Sent {name}. Check the keyboard: the colour can't be read back.")
 
     def _set_light(self, iface, message, **change):
         if self.light_busy:

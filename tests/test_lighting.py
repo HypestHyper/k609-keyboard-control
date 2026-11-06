@@ -142,3 +142,47 @@ def test_bad_backup_is_refused(tmp_path):
     assert lighting.load_backup(str(path)) is None
     with pytest.raises(FileNotFoundError):
         lighting.restore("/dev/x", str(path), **FakeKeyboard(block()).io())
+
+
+def test_colour_table_template_is_the_recorded_table():
+    t = hidraw.colour_table_template()
+    assert len(t) == 1032 and t[:5] == bytes.fromhex("0608c80040") and t[29:32] == bytes(3)
+    assert t[32:35] == bytes.fromhex("0000ff") and not any(t[491:])
+
+
+def test_colour_table_write_only_changes_fixed_colour():
+    t = lighting.build_colour_table((0x12, 0x34, 0x56))
+    assert t[29:32] == bytes.fromhex("123456") and hidraw.is_colour_table_write(t)
+    tampered = bytearray(t); tampered[33] ^= 0xFF
+    assert not hidraw.is_colour_table_write(bytes(tampered))
+    assert not hidraw.is_colour_table_write(t[:-1])
+    with pytest.raises(ValueError):
+        lighting.build_colour_table((256, 0, 0))
+
+
+def test_parse_hex_colour():
+    assert lighting.parse_hex_colour("#FF8800") == (255, 136, 0)
+    assert lighting.parse_hex_colour("00ff00") == (0, 255, 0)
+    for bad in ("fff", "gg0000", "#1234567", ""):
+        with pytest.raises(ValueError):
+            lighting.parse_hex_colour(bad)
+
+
+class ColourKeyboard(FakeKeyboard):
+    def __init__(self, data):
+        super().__init__(data)
+        self.sequence = []
+
+    def ioctl(self, fd, request, buf, mutate):
+        self.sequence.append(bytes(buf[:3]).hex())
+        return super().ioctl(fd, request, buf, mutate)
+
+
+def test_set_fixed_colour_follows_official_sequence():
+    kb = ColourKeyboard(block(0x01))
+    st = lighting.set_fixed_colour("/dev/x", (255, 0, 0), **kb.io())
+    assert st.name == "Fixed on"
+    # read command, read, colour table, block save, read command, read back
+    assert kb.sequence == ["0583c6", "060000", "0608c8", "0603c6", "0583c6", "060000"]
+    assert kb.writes[0][29:32] == b"\xff\x00\x00"
+    assert kb.writes[1][3:262] == block(0x01)[3:262]

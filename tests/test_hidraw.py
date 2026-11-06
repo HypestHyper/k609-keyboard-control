@@ -113,8 +113,8 @@ def test_module_has_no_write_paths():
     import inspect
     src = inspect.getsource(hidraw)
     assert "os.write" not in src
-    # SET_FEATURE is used in exactly two places: the allow-listed command and the checked block write.
-    assert src.count("hidiocsfeature(len(") == 2
+    # SET_FEATURE is used in exactly three places, each behind its own check.
+    assert src.count("hidiocsfeature(len(") == 3
     assert hidraw.ALLOWED_COMMANDS == {bytes.fromhex("0583c6000000")}
 
 
