@@ -2,7 +2,7 @@
 
 A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
 
-**Status: inspector (v0.3).** It finds the keyboard, picks its configuration interface
+**Status: v0.4.** It finds the keyboard, picks its configuration interface
 (HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
 fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
 software sends. That is the only command the app can send, and it **changes no settings**. It never
@@ -33,7 +33,7 @@ PYTHONPATH=src python -m horus_control --inspect --read-lighting
 
 ```bash
 ./tools/build-appimage.sh
-./dist/Horus_Control-0.3.0-x86_64.AppImage
+./dist/Horus_Control-0.4.0-x86_64.AppImage
 ```
 
 The script downloads `appimagetool` 1.9.0 into `build/` the first time.
@@ -71,6 +71,22 @@ sudo rm /etc/udev/rules.d/70-horus-control.rules && sudo udevadm control --reloa
 ```
 
 The rule uses `TAG+="uaccess"` (a session ACL for the active user), never mode `0666`.
+
+## Lighting tab
+
+Changes the effect, and each effect's brightness and speed (0–4). Each change reads the
+lighting block, changes only those bytes, saves it with the same command Redragon's software uses
+(`06 03 c6 …`), then reads it back to check. Before the first change, the effect, brightness and
+speed values are saved to `~/.config/horus-control/lighting-backup.json`, and **Restore** puts them
+back. Colour isn't supported yet.
+
+Decoded layout of the lighting block (byte offsets include the 3-byte header):
+
+| Byte | Meaning |
+|---|---|
+| 20 | `01` for Self define, otherwise `00` |
+| 21 | Effect: `00` Off, `01`–`12` effects, `15` Self define |
+| 39 + 2 × (effect − 1) | That effect's speed (high digit) and brightness (low digit), 0–4 each |
 
 ## Finding what each setting does
 

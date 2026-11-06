@@ -12,9 +12,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import __version__, capabilities, settings as settings_mod  # noqa: E402
+from . import __version__, capabilities, lighting, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
-from .hidraw import AccessDenied, DeviceGone, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
+from .hidraw import AccessDenied, DeviceGone, WriteFailed, describe_diff, diff_blocks, hexdump, read_lighting_block  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 APP_ID = "io.github.hypesthyper.HorusControl"
@@ -162,6 +162,7 @@ class Window(Gtk.ApplicationWindow):
         self.tabs = []
         for i, (name, title, icon_name) in enumerate((
                 ("keyboard", "Keyboard", "input-keyboard-symbolic"),
+                ("lighting", "Lighting", "display-brightness-symbolic"),
                 ("settings", "Settings", "preferences-system-symbolic"))):
             btn = Gtk.ToggleButton(tooltip_text=f"{title} (Alt+{i + 1})")
             inner = hbox(8)
@@ -178,6 +179,10 @@ class Window(Gtk.ApplicationWindow):
         root.append(self.stack)
 
         self.keyboard_page = self._page("keyboard")
+        self.lighting_page = self._page("lighting")
+        self.light_state = None                 # (devnode, lighting.State) once loaded
+        self.light_busy = False
+        self.light_message = ("", "dim")
         self.settings_page = self._page("settings")
         self._build_settings()
         self.tabs[0].set_active(True)
@@ -267,6 +272,7 @@ class Window(Gtk.ApplicationWindow):
     def render(self):
         kb = self.current()
         iface = kb.config_interface if kb else None
+        self.render_lighting(iface)
         clear(self.status_holder)
         if not self.keyboards:
             self.status_holder.append(chip("Not found", "neutral", "dialog-information-symbolic"))
@@ -500,7 +506,8 @@ class Window(Gtk.ApplicationWindow):
             text.append(label(cap.title, "heading"))
             text.append(label(cap.evidence, "small", "dim"))
             row.append(text)
-            c = chip("Not yet verified", "neutral")
+            usable = cap.status in (capabilities.Status.HARDWARE, capabilities.Status.HOST)
+            c = chip("On the Lighting tab", "ok") if usable else chip("Not yet verified", "neutral")
             c.set_valign(Gtk.Align.CENTER)
             row.append(c)
             card.append(row)
@@ -601,6 +608,141 @@ class Window(Gtk.ApplicationWindow):
             pass  # GTK older than 4.14
 
     # --- settings page -------------------------------------------------------
+
+    # --- lighting tab ------------------------------------------------------------
+
+    def render_lighting(self, iface):
+        page = self.lighting_page
+        clear(page)
+        if self.light_state and (iface is None or self.light_state[0] != iface.devnode):
+            self.light_state = None
+        page.append(section("Lighting", "Changes are saved on the keyboard straight away. Close "
+                                        "Redragon's software first, so the two don't use the keyboard "
+                                        "at the same time."))
+        card = vbox(16, "card")
+        page.append(card)
+        if iface is None:
+            card.append(label("Connect the keyboard with its USB cable to change its lighting.", "dim"))
+            return
+        if not iface.access:
+            card.append(label("Horus Control can't open the keyboard yet. The Keyboard tab shows how to "
+                              "allow it.", "dim"))
+            return
+
+        if self.light_state is None:
+            card.append(label("Read the current effect, brightness and speed from the keyboard.", "small", "dim"))
+            load = Gtk.Button(label="Reading…" if self.light_busy else "Load current lighting")
+            load.add_css_class("filled")
+            load.set_halign(Gtk.Align.START)
+            load.set_sensitive(not self.light_busy)
+            load.connect("clicked", lambda *_: self._light_run(
+                lambda: lighting.read_state(iface.devnode), lambda st: ""))
+            card.append(load)
+        else:
+            st = self.light_state[1]
+            codes = list(lighting.EFFECTS)
+            effect_box = vbox(8)
+            effect_box.append(label("Effect", "heading"))
+            dd = Gtk.DropDown.new_from_strings([lighting.EFFECTS[c] for c in codes])
+            dd.set_selected(codes.index(st.effect))
+            dd.set_halign(Gtk.Align.START)
+            dd.set_sensitive(not self.light_busy)
+            set_accessible_label(dd, "Lighting effect")
+            dd.connect("notify::selected", lambda d, _p: self._set_light(
+                iface, f"Set {lighting.EFFECTS[codes[d.get_selected()]]}.", effect=codes[d.get_selected()]))
+            effect_box.append(dd)
+            if st.effect == lighting.SELF_DEFINE:
+                effect_box.append(label("Shows the per-key colours set in Redragon's software.", "small", "dim"))
+            card.append(effect_box)
+
+            levels = [(str(i), str(i)) for i in range(lighting.MAX_LEVEL + 1)]
+            if st.brightness is not None:
+                for title, expl, key, cur in (
+                        ("Brightness", f"For {st.name}. 0 turns the lights off, 4 is brightest.",
+                         "brightness", st.brightness),
+                        ("Speed", f"For {st.name}. 0 is slowest, 4 is fastest. Some effects don't move.",
+                         "speed", st.speed)):
+                    card.append(Gtk.Box(css_classes=["divider"]))
+                    row = self._group_row(title, expl, levels, str(cur),
+                                          lambda v, k=key, t=title: self._set_light(
+                                              iface, f"{t} {v} for {st.name}.", **{k: int(v)}))
+                    row.set_sensitive(not self.light_busy)
+                    card.append(row)
+            else:
+                card.append(label(f"{st.name} has no brightness or speed setting.", "small", "dim"))
+
+        text, kind = self.light_message
+        if text:
+            card.append(label(text, "small", kind))
+
+        saved = lighting.load_backup(lighting.backup_path())
+        page.append(section("Restore", None))
+        rc = vbox(10, "card")
+        if saved:
+            rc.append(label("Puts back the effect, brightness and speed the keyboard had before your first "
+                            f"change in Horus Control (saved {saved[0].replace('T', ' at ')}).", "small", "dim"))
+            btn = Gtk.Button(label="Restore")
+            btn.set_halign(Gtk.Align.START)
+            btn.set_sensitive(not self.light_busy)
+            btn.connect("clicked", lambda *_: self._light_run(
+                lambda: lighting.restore(iface.devnode, lighting.backup_path()),
+                lambda st: f"Restored {st.name}."))
+            rc.append(btn)
+        else:
+            rc.append(label("Before your first change, Horus Control saves the keyboard's effect, brightness "
+                            "and speed so you can put them back here.", "small", "dim"))
+        page.append(rc)
+        page.append(label("Colour can't be changed yet: it's stored in a part of the keyboard Horus Control "
+                          "can't read yet.", "small", "faint"))
+
+    def _set_light(self, iface, message, **change):
+        if self.light_busy:
+            return
+        cur = self.light_state[1] if self.light_state else None
+        if cur and all(getattr(cur, k) == v for k, v in change.items()):
+            return
+        self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(), **change),
+                        lambda st: message)
+
+    def _light_run(self, job, describe):
+        kb = self.current()
+        iface = kb.config_interface if kb else None
+        if iface is None or self.light_busy:
+            return
+        self.light_busy = True
+        self.light_message = ("", "dim")
+        GLib.idle_add(lambda: (self.render(), False)[1])
+        devnode = iface.devnode
+
+        def work():
+            try:
+                st = job()
+                result = (st, (describe(st), "dim"))
+            except lighting.VerifyFailed:
+                result = (None, ("The keyboard didn't keep the change. Load the lighting again to see "
+                                 "what it has now.", "error-text"))
+            except lighting.UnexpectedBlock as e:
+                result = (None, (f"The keyboard's settings don't look as expected, so nothing was changed. {e}",
+                                 "error-text"))
+            except AccessDenied:
+                result = (None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+            except DeviceGone:
+                result = (None, ("The keyboard was disconnected.", "error-text"))
+            except FileNotFoundError:
+                result = (None, ("There's no saved lighting to restore.", "error-text"))
+            except (WriteFailed, OSError) as e:
+                result = (None, (f"Couldn't talk to the keyboard: {e}. Load the lighting again to check it.",
+                                 "error-text"))
+            GLib.idle_add(self._light_done, devnode, result)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _light_done(self, devnode, result):
+        self.light_busy = False
+        st, self.light_message = result
+        self.light_state = (devnode, st) if st else None
+        self.render()
+        self.say(self.light_message[0])
+        return False
 
     def _build_settings(self):
         s = self.app.settings

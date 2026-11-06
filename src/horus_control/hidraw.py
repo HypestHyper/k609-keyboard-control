@@ -1,9 +1,9 @@
 """Linux hidraw access: report-descriptor parsing, GET_FEATURE and one read command.
 
-The only SET_FEATURE this module can send is a command from ALLOWED_COMMANDS:
-byte-for-byte copies of read requests captured from the official Redragon
-software. Nothing here can change a keyboard setting, and there is no
-output-report or write() call anywhere in Horus Control.
+SET_FEATURE is sent in exactly two shapes, both copied from a USB capture of the
+official Redragon software: a command from ALLOWED_COMMANDS on report 0x05 (the
+read request), and the lighting block saved back on report 0x06, checked by
+is_lighting_write(). There is no output-report or write() call anywhere.
 """
 
 from __future__ import annotations
@@ -217,32 +217,79 @@ def _send_command(fd, command: bytes, ioctl) -> None:
     ioctl(fd, hidiocsfeature(len(buf)), buf, True)
 
 
-def read_lighting_block(devnode: str, *, opener=os.open, ioctl=fcntl.ioctl, closer=os.close,
-                        sleep=time.sleep) -> FeatureResult:
-    """Ask for the lighting settings block, exactly as the official software does."""
-    fd = _open(devnode, opener)
-    try:
+class WriteFailed(Exception):
+    pass
+
+
+LIGHTING_WRITE_HEADER = bytes.fromhex("0603c6")
+BLOCK_LEN = 262            # meaningful bytes in the lighting block, header included
+
+
+def is_lighting_write(buf: bytes) -> bool:
+    """The only shape of SET_FEATURE 0x06 Horus Control may send: the lighting block saved back,
+    as the official software does (06 03 c6, block marker 5a a5, zero padding to 1032 bytes)."""
+    return (len(buf) == BLOCK_BUFFER_LEN and buf[:3] == LIGHTING_WRITE_HEADER
+            and buf[14:16] == b"\x5a\xa5" and not any(buf[BLOCK_LEN:]))
+
+
+def _lighting_problem(data: bytes) -> str:
+    if not data.startswith(LIGHTING_REPLY_PREFIX):
+        return "The reply doesn't start with 06 83 c6, so it isn't the lighting block."
+    if len(data) < 22:
+        return f"Short reply: {len(data)} bytes."
+    return ""
+
+
+class Session:
+    """One open handle on the configuration interface for a read, or a read-write-verify."""
+
+    def __init__(self, devnode: str, *, opener=os.open, ioctl=fcntl.ioctl, closer=os.close,
+                 sleep=time.sleep):
+        self.devnode, self._opener, self._ioctl, self._closer, self._sleep = devnode, opener, ioctl, closer, sleep
+        self.fd = None
+
+    def __enter__(self):
+        self.fd = _open(self.devnode, self._opener)
+        return self
+
+    def __exit__(self, *exc):
+        self._closer(self.fd)
+        return False
+
+    def _gone(self, e: OSError):
+        if e.errno in (errno.ENODEV, errno.ENXIO, errno.ENOENT):
+            raise DeviceGone(self.devnode) from e
+
+    def read_lighting(self) -> FeatureResult:
         try:
-            _send_command(fd, READ_LIGHTING, ioctl)
-            sleep(0.02)
+            _send_command(self.fd, READ_LIGHTING, self._ioctl)
+            self._sleep(0.02)
             buf = bytearray(BLOCK_BUFFER_LEN)
             buf[0] = 0x06
-            n = ioctl(fd, hidiocgfeature(len(buf)), buf, True)
+            n = self._ioctl(self.fd, hidiocgfeature(len(buf)), buf, True)
         except OSError as e:
-            if e.errno in (errno.ENODEV, errno.ENXIO, errno.ENOENT):
-                raise DeviceGone(devnode) from e
+            self._gone(e)
             return FeatureResult(0x06, BLOCK_BUFFER_LEN, b"", f"Read failed: {os.strerror(e.errno or 0)}.")
-    finally:
-        closer(fd)
-    n = n if isinstance(n, int) and n >= 0 else 0
-    data = bytes(buf[:min(n, len(buf))])
-    if not data.startswith(LIGHTING_REPLY_PREFIX):
-        problem = "The reply doesn't start with 06 83 c6, so it isn't the lighting block."
-    elif len(data) < 22:
-        problem = f"Short reply: {len(data)} bytes."
-    else:
-        problem = ""
-    return FeatureResult(0x06, BLOCK_BUFFER_LEN, data, problem)
+        n = n if isinstance(n, int) and n >= 0 else 0
+        data = bytes(buf[:min(n, len(buf))])
+        return FeatureResult(0x06, BLOCK_BUFFER_LEN, data, _lighting_problem(data))
+
+    def write_lighting(self, payload: bytes) -> None:
+        if not is_lighting_write(payload):
+            raise ValueError("not a lighting block write")
+        buf = bytearray(payload)
+        try:
+            self._ioctl(self.fd, hidiocsfeature(len(buf)), buf, True)
+        except OSError as e:
+            self._gone(e)
+            raise WriteFailed(os.strerror(e.errno or 0)) from e
+        self._sleep(0.1)
+
+
+def read_lighting_block(devnode: str, **io) -> FeatureResult:
+    """Ask for the lighting settings block, exactly as the official software does."""
+    with Session(devnode, **io) as session:
+        return session.read_lighting()
 
 
 def read_feature_reports(devnode: str, reports, *, opener=os.open, ioctl=fcntl.ioctl,

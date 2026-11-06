@@ -113,8 +113,8 @@ def test_module_has_no_write_paths():
     import inspect
     src = inspect.getsource(hidraw)
     assert "os.write" not in src
-    # SET_FEATURE is used in exactly one place, behind the allow-list.
-    assert src.count("hidiocsfeature(len(") == 1
+    # SET_FEATURE is used in exactly two places: the allow-listed command and the checked block write.
+    assert src.count("hidiocsfeature(len(") == 2
     assert hidraw.ALLOWED_COMMANDS == {bytes.fromhex("0583c6000000")}
 
 
@@ -176,3 +176,21 @@ def test_diff_blocks():
     assert hidraw.describe_diff(hidraw.diff_blocks(a, bytes(b))) == "byte 20: 00 → 01, byte 21: 0e → 07"
     assert hidraw.diff_blocks(a, a) == []
     assert hidraw.diff_blocks(a, a[:-1]) == [(len(a) - 1, a[-1], None)]
+
+
+def test_lighting_write_shape_is_enforced():
+    good = bytes.fromhex("0603c6") + BLOCK[3:262] + bytes(770)
+    assert hidraw.is_lighting_write(good)
+    bad = [good[:-1], bytes.fromhex("0604d8") + good[3:], good[:300] + b"\x01" + good[301:],
+           good[:14] + b"\x00\x00" + good[16:]]
+    dev = FakeKeyboard()
+    for b in bad:
+        assert not hidraw.is_lighting_write(b)
+        with pytest.raises(ValueError):
+            with hidraw.Session("/dev/x", opener=dev.open, ioctl=dev.ioctl, closer=dev.close,
+                                sleep=lambda s: None) as sess:
+                sess.write_lighting(b)
+    assert dev.requests == []
+    with hidraw.Session("/dev/x", opener=dev.open, ioctl=dev.ioctl, closer=dev.close, sleep=lambda s: None) as sess:
+        sess.write_lighting(good)
+    assert dev.requests == [(hidraw.hidiocsfeature(1032), good)] and dev.closed

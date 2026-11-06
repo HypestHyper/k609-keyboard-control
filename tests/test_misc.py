@@ -7,9 +7,21 @@ from horus_control import capabilities, settings, style
 
 def test_unknown_capabilities_cannot_run():
     for cap in capabilities.CAPABILITIES:
+        if cap.key == "lighting":
+            assert cap.status == capabilities.Status.HARDWARE
+            capabilities.require_usable(cap.key)
+            continue
         assert cap.status == capabilities.Status.UNKNOWN
         with pytest.raises(capabilities.NotVerified):
             capabilities.require_usable(cap.key)
+
+
+def test_lighting_writes_are_gated(monkeypatch):
+    from horus_control import lighting
+    unknown = capabilities.Capability("lighting", "x", capabilities.Status.UNKNOWN, "")
+    monkeypatch.setattr(capabilities, "CAPABILITIES", (unknown,))
+    with pytest.raises(capabilities.NotVerified):
+        lighting.apply("/dev/never-opened", effect=1)
 
 
 def test_settings_roundtrip_and_atomic(tmp_path):
