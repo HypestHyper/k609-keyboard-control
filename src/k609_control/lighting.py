@@ -157,14 +157,14 @@ GAP_BEFORE_BLOCK = 0.05
 GAP_AFTER_BLOCK = 0.04
 
 
-# Experimental timing, chosen with HORUS_SAVE_MODE, to investigate a brief LED glitch that the
+# Experimental timing, chosen with K609_SAVE_MODE, to investigate a brief LED glitch that the
 # official software doesn't show although the recorded traffic is identical. Same commands only.
 #   official (default): as above.  once: a single save.  slow: as official, with longer pauses.
 SAVE_MODES = ("official", "once", "slow")
 
 
 def save_mode() -> str:
-    mode = os.environ.get("HORUS_SAVE_MODE", "official")
+    mode = os.environ.get("K609_SAVE_MODE", "official")
     return mode if mode in SAVE_MODES else "official"
 
 

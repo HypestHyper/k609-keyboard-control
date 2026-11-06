@@ -4,8 +4,8 @@ import pytest
 from test_keymap import caps_default
 from test_lighting import block
 
-from horus_control import hidraw, keymap, macros, profiles
-from horus_control.macros import Macro, Step
+from k609_control import hidraw, keymap, macros, profiles
+from k609_control.macros import Macro, Step
 
 
 class WholeKeyboard:

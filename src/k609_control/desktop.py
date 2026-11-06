@@ -85,6 +85,19 @@ def install(exec_path: str) -> bool:
     return changed
 
 
+LEGACY_IDS = ("io.github.hypesthyper.HorusControl",)   # entries written by versions before the rename
+
+
+def remove_legacy() -> None:
+    for old in LEGACY_IDS:
+        for path in (os.path.join(data_home(), "applications", f"{old}.desktop"),
+                     os.path.join(data_home(), "icons", "hicolor", "scalable", "apps", f"{old}.svg")):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
 def remove() -> None:
     for path in (entry_path(), icon_path()):
         try:

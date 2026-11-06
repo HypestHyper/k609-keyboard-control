@@ -3,8 +3,8 @@ import json
 import pytest
 from test_keymap import FakeKeyboard, caps_default
 
-from horus_control import hidraw, keymap, macros
-from horus_control.macros import Macro, Step
+from k609_control import hidraw, keymap, macros
+from k609_control.macros import Macro, Step
 
 A, B, C, D = 0x04, 0x05, 0x06, 0x07
 

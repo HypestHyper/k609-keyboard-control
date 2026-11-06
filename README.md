@@ -1,204 +1,107 @@
-# Redragon Horus SE K609 Control
+<p align="center">
+  <img alt="Keyboard Control" src="src/k609_control/resources/io.github.HypestHyper.K609KeyboardControl.svg" width="128">
+</p>
 
-A personal Linux app for the Redragon Horus SE K609 (not made by Redragon). Its launcher entry is
-called **Keyboard Control**; when run as an AppImage it adds that entry and its icon to
-`~/.local/share` itself (Settings → App launcher turns this off and removes them).
+<h1 align="center">Keyboard Control</h1>
 
-A small GTK 4 app for the **Redragon Horus SE K609GG** keyboard over **wired USB** (`258a:0049`).
+<p align="center">
+  Linux software for the <b>Redragon Horus SE K609</b> (K609GG) keyboard: RGB lighting, key remapping, macros and profiles, without Windows or Wine. A GTK 4 app, shipped as one AppImage that runs on most distributions.
+</p>
 
-**Status: v0.11.1.** It finds the keyboard, picks its configuration interface
-(HID interface 1) and, on request, reads the lighting settings block. To do that it sends one
-fixed read request (`05 83 c6 00 00 00` on report `0x05`), which is the one the official Redragon
-software sends. That is the only command the app can send, and it **changes no settings**. It never
-opens the typing interface (interface 0) and never reads keystrokes. Lighting, remapping,
-macros and the rest stay hidden until their protocol is proven on this keyboard.
+<p align="center">
+  <img alt="Version 0.12.0" src="https://img.shields.io/badge/version-0.12.0-4d7cff">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
+  <img alt="AppImage" src="https://img.shields.io/badge/package-AppImage-2b88d8">
+  <img alt="GTK 4" src="https://img.shields.io/badge/GTK-4-4A86CF">
+  <img alt="Material 3 Expressive" src="https://img.shields.io/badge/style-Material%203%20Expressive-8f7ae0">
+</p>
 
-## Run
+<p align="center">
+  <a href="#installation">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#keyboard-access">Keyboard access</a> ·
+  <a href="#command-line">Command line</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-Needs GTK 4 and PyGObject from the system. On CachyOS/Arch:
+---
 
-```bash
-sudo pacman -S --needed python-gobject gtk4
-```
+> **AI disclosure:** This project was written almost entirely by an AI assistant, with direction and testing by the author. It has been tested on CachyOS (Arch Linux) with Hyprland and one Horus SE K609GG, so review the code before relying on it.
 
-From the source folder:
+> **Unofficial:** not affiliated with or endorsed by Redragon. It talks to the keyboard the same way Redragon's Windows software does, using commands recorded from that software. Trademarks belong to their owners.
 
-```bash
-PYTHONPATH=src python -m horus_control
-```
+## Features
 
-Without a window, to print what's found and the lighting block:
+- **Lighting:** all 18 effects plus off and self-defined, brightness and speed for each effect, and the Fixed on colour with a colour wheel, RGB sliders and hex entry.
+- **Key remapping:** click a key on a picture of the keyboard and choose what it sends: letters, F1–F24, navigation keys, modifiers (Caps Lock to Ctrl), or a macro. Fn stays locked so you can't lose its shortcuts.
+- **Macros:** key presses and releases with pauses, repeated a number of times or while held, stored in the keyboard.
+- **Profiles:** save lighting, keys and macros together, switch with one click or a keyboard shortcut, and export or import them as files.
+- Everything is saved **in the keyboard**, so it keeps working on any computer, with nothing running in the background.
+- Light and dark themes, accent colours, three sizes, keyboard navigation and screen reader labels.
 
-```bash
-PYTHONPATH=src python -m horus_control --inspect --read-lighting
-```
+## Compatible keyboards
 
-## AppImage
+| Keyboard | USB ID | Connection |
+| --- | --- | --- |
+| Redragon Horus SE K609 / K609GG / K609 RGB PRO | `258a:0049` (BY Tech Gaming Keyboard) | Wired USB |
 
-```bash
-./tools/build-appimage.sh
-./dist/Horus_Control-0.11.1-x86_64.AppImage
-```
+The 2.4 GHz receiver and Bluetooth aren't supported. Other keyboards with the same USB ID may use a different layout: the app checks the keyboard's data and refuses to write if it doesn't match.
 
-The script downloads `appimagetool` 1.9.0 into `build/` the first time.
+## Installation
 
-The AppImage bundles the app, but **uses the host's Python, GTK 4 and PyGObject**. The app is
-pure Python and has no native dependencies of its own (it talks to hidraw through ioctls,
-so no `hidapi`). Bundling all of GTK 4 is
-much larger and more fragile, since graphics drivers must still come from the host. On CachyOS,
-`python-gobject` and `gtk4` are normal packages. If they're missing, the AppImage says so.
+1. Download `K609_Keyboard_Control-…-x86_64.AppImage` from [Releases](../../releases/latest).
+2. Make it executable and start it:
 
-## Permission (optional, done by you)
+   ```sh
+   chmod +x K609_Keyboard_Control-*-x86_64.AppImage
+   ./K609_Keyboard_Control-*-x86_64.AppImage
+   ```
 
-The configuration interface `/dev/hidrawN` is usually root-only. The app shows this and
-doesn't ask for root. To allow your logged-in user to open **only interface 1 of this
-keyboard**, install the rule in `packaging/70-horus-control.rules`:
+The first start adds **Keyboard Control** to your app launcher. It bundles Python and GTK 4, so nothing else needs installing; distributions from about 2022 on are supported (Ubuntu 22.04+, Debian 12, Fedora, Arch, openSUSE, Mint 21+). If it won't start, install FUSE 2 (`sudo pacman -S fuse2`, `sudo apt install libfuse2`, `sudo dnf install fuse`), or run it with `--appimage-extract-and-run`.
 
-```bash
-sudo install -m 644 packaging/70-horus-control.rules /etc/udev/rules.d/70-horus-control.rules
-```
+## Keyboard access
 
-```bash
+Linux only lets root open the keyboard's settings channel. The app shows the commands to allow your user once; they install this udev rule, which covers only this keyboard's settings interface, never its typing interface:
+
+```sh
+printf '%s\n' '# Keyboard Control: let the logged-in user open the K609GG configuration interface.' '# Wired USB 258a:0049, HID interface 1 only. Typing interface 0 is left alone.' 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0049", ENV{HORUS_K609GG}="1"' 'SUBSYSTEM=="hidraw", ENV{HORUS_K609GG}=="1", ATTRS{bInterfaceNumber}=="01", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-horus-control.rules > /dev/null
 sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
 ```
 
-Then unplug and reconnect the keyboard. Check that it applied to the right node:
+Then unplug and reconnect the keyboard. The rule is also in [`packaging/70-horus-control.rules`](packaging/70-horus-control.rules). The app never reads what you type.
 
-```bash
-getfacl /dev/hidraw* 2>/dev/null | grep -B3 "user:$USER"
+## Command line
+
+```sh
+K609_Keyboard_Control.AppImage --apply-profile Gaming   # apply a saved profile, then exit
+K609_Keyboard_Control.AppImage --list-profiles
+K609_Keyboard_Control.AppImage --inspect                # show the detected keyboard
 ```
 
-Remove it:
-
-```bash
-sudo rm /etc/udev/rules.d/70-horus-control.rules && sudo udevadm control --reload
-```
-
-The rule uses `TAG+="uaccess"` (a session ACL for the active user), never mode `0666`.
-
-## Lighting tab
-
-Changes the effect, and each effect's brightness and speed (0–4). Each change reads the
-lighting block, changes only those bytes, saves it with the same command Redragon's software uses
-(`06 03 c6 …`), then reads it back to check. Before the first change, the effect, brightness and
-speed values are saved to `~/.config/horus-control/lighting-backup.json`, and **Restore** puts them
-back.
-
-**Fixed on colour.** The colour is bytes 29–31 (red, green, blue) of a separate colour table
-(`06 08 c8 …`) that the keyboard can't report back. Redragon's software always sends the whole table
-before saving. Horus Control does the same: it sends the table as recorded from Redragon's software
-(`src/horus_control/colour_table.hex`, identical across 16 recorded saves apart from those 3 bytes)
-with your colour, then saves the lighting block unchanged. Other effects' colours in that table are
-not decoded, so they're always sent as recorded. Restore can't undo a colour.
-
-Every save copies the official software's sequence and timing: read command, 20 ms, read,
-20 ms, colour table, 50 ms, lighting block, 40 ms, and the whole save twice. The colour table is
-included with the last colour Horus Control set; if it has never set one, the table is left out.
-Like the official software (through Wine), Horus Control keeps the configuration interface open
-while it runs instead of opening it for each action, which made the LEDs flash. It never reads
-the input reports that queue on that handle.
-
-Decoded layout of the lighting block (byte offsets include the 3-byte header):
-
-| Byte | Meaning |
-|---|---|
-| 20 | `01` for Self define, otherwise `00` |
-| 21 | Effect: `00` Off, `01`–`12` effects, `15` Self define |
-| 39 + 2 × (effect − 1) | That effect's speed (high digit) and brightness (low digit), 0–4 each |
-
-## Keys tab (key remapping)
-
-`05 84 d8 00 00 00` then GET `0x06` returns the key map (starts `06 84 d8 00 84`): an 8-byte header,
-then 256 entries of 4 bytes (type, two zero bytes, USB key code). Types: `00` normal key, `02`
-pointer, `04` media key, `06` modifier, `0e` Fn function, `20` Fn key.
-
-Each key's entry is its key number from Redragon's `Cfg.ini`; if that entry is a pointer (`02`),
-the key's real entry is its code + 132. This places all 66 non-Fn keys on an entry holding their
-default code, and matches the two remaps recorded from Redragon's software (Caps Lock = 143,
-Esc = 147). Saves use `06 04 d8 00 40 00 00 00` + the map, once, then Horus Control reads it back
-to check. Horus Control's saves for the recorded remap and reset are byte-for-byte identical to
-Redragon's.
-
-The entry type follows the code: `06` for modifiers (`e0`–`e7`), `00` otherwise. This was confirmed
-by remapping Ctrl, Shift, Win and Alt to letters and back in Redragon's software.
-
-Supported: every key except Fn (Right Ctrl's default entry is the special `20 01 00 00`, restored on reset), to letters, numbers, punctuation,
-F1–F24, navigation and editing keys, or modifiers. Not yet: media keys. Remapping a normal key to a
-modifier (for example Caps Lock to Ctrl) isn't offered by Redragon's software; it uses the same entry
-format as the keyboard's own modifier keys. **Reset all keys** restores every key's
-default code and works with the mouse alone.
-
-## Macros tab
-
-Macros are key presses and releases with pauses, played by a normal key, stored in the keyboard.
-Decoded from four macros saved by Redragon's software (all reproduced byte for byte):
-
-- Macro block, saved with `06 05 e8 00 40 00 00 00`: 128-byte slots. A slot is `00`, the repeat
-  count, then 2-byte events `[timing, key]`. `0x80` in timing = key release; its low 7 bits = pause
-  after the event in ms (1–127). Longer pauses: timing `03`, then `00 03` and a 2-byte count of 100 ms.
-- The key's key map entry: `10 00 <mode> <0x18 + slot>`, mode `01` = repeat N times, `04` = while held.
-- Save order: read key map, write macro block, write key map.
-
-The keyboard can't report macros back, so Horus Control keeps them in
-`~/.config/horus-control/macros.json` and writes all assigned macros together (up to 8). This
-replaces macros set in Redragon's software. G1–G4 (recorded with MR on the keyboard) and mouse
-buttons aren't supported.
-
-## Profiles
-
-The keyboard has no profiles of its own: Redragon's Profile 1/2/3 buttons rewrite the colour table,
-key map and lighting block from the software's copy. Horus Control profiles do the same. A profile
-(lighting, key remaps, macros) is saved in `~/.config/horus-control/profiles/<name>.json` and written
-to the keyboard when applied.
-
-Apply from the Profiles tab, or from the command line (it applies, prints the result, shows a desktop
-notification when started from a key binding, and exits):
-
-```bash
-./dist/Horus_Control-0.11.1-x86_64.AppImage --apply-profile Gaming
-```
-
-To switch from the keyboard, remap a spare key to F13–F24 and bind it in Hyprland, for example:
+To switch profiles from the keyboard, remap a spare key to F13–F24 and bind it in your desktop. In Hyprland:
 
 ```
-bind = , F13, exec, "/path/to/Horus_Control.AppImage" --apply-profile "Gaming"
+bind = , F13, exec, ~/Applications/K609_Keyboard_Control.AppImage --apply-profile "Gaming"
 ```
 
-`--list-profiles` prints the saved profile names.
+## Files
 
-Profiles can be exported to a file and imported again (Profiles tab). An imported profile whose
-name is taken gets a number added.
+| What | Where |
+| --- | --- |
+| Settings, macros, profiles | `~/.config/k609-keyboard-control/` |
+| Launcher entry and icon | `~/.local/share/applications/`, `~/.local/share/icons/` |
 
-## Finding what each setting does
+## Development
 
-Open Redragon's software (in Bottles) and Horus Control side by side. Pick and apply one thing in
-Redragon's software, type its name in Horus Control and press Enter. Horus Control reads the
-lighting block and adds the changed bytes to **Your list**. When done, press **Copy list**.
-Horus Control only reads when you press Enter, never in the background, so it can't collide with
-Redragon's own read-then-write of the key map.
-
-## Settings
-
-`~/.config/horus-control/settings.json` (theme, size, reduce motion). The folder is created
-only when you change a setting. No logs are written.
-
-## Tests
-
-```bash
-pytest
+```sh
+PYTHONPATH=src python3 -m k609_control    # run from the source folder (needs GTK 4 and PyGObject)
+python3 -m pytest                         # tests use fake keyboards, never a real one
+sh tools/build-appimage.sh                # build the AppImage (Ubuntu 22.04, or podman/docker)
 ```
 
-The tests use a fake sysfs tree and a fake device, so they don't need the keyboard.
-For development, `HORUS_CONTROL_SYSFS=/path/to/fake/sys` points the scan at a fake tree.
+How the keyboard protocol was worked out, byte by byte: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-## Known facts
+## License
 
-- Interface 1 declares feature report `0x05` (5 bytes) and `0x06` (1031 bytes), plus one
-  report-ID byte each when read. There is no report `0x08`.
-- Protocol, from a USB capture of the official software: send a 6-byte command on report
-  `0x05`, then read or write report `0x06`. `05 83 c6 …` then GET `0x06` returns the lighting
-  block (starts `06 83 c6`). `06 03 c6 …` writes it back. `05 84 d8 …` / `06 04 d8 …` read and
-  write a key-map block. `06 08 c8 …` and `06 09 cc/d0 …` are unknown tables.
-- In the lighting block, byte 21 changes with the effect (seen values `01`, `0e`, `07`, `15`)
-  and byte 20 changed once (`00` to `01`). Nothing else is decoded.
-- The 2.4 GHz receiver (`25a7:fa70`) and Bluetooth are out of scope.
+MIT, see [LICENSE](LICENSE).

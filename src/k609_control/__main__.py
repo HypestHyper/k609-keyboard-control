@@ -8,7 +8,7 @@ def inspect(read: bool, lighting: bool = False) -> int:
     from .device import find_keyboards
     from .hidraw import AccessDenied, DeviceGone, hexdump, read_feature_reports, read_lighting_block
 
-    keyboards = find_keyboards(os.environ.get("HORUS_CONTROL_SYSFS", "/sys"))
+    keyboards = find_keyboards(os.environ.get("K609_SYSFS", "/sys"))
     if not keyboards:
         print("No wired 258a:0049 keyboard found.")
         return 1
@@ -51,7 +51,7 @@ def notify(text: str, error: bool = False) -> None:
         import shutil
         import subprocess
         if shutil.which("notify-send"):
-            subprocess.Popen(["notify-send", "-a", "Horus Control", "-t", "2500", text],
+            subprocess.Popen(["notify-send", "-a", "Keyboard Control", "-t", "2500", text],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -65,14 +65,14 @@ def apply_profile(name: str) -> int:
         known = ", ".join(x.name for x in profiles.load_all()) or "none saved yet"
         notify(f"No profile called “{name}”. Profiles: {known}.", error=True)
         return 2
-    kbs = [k for k in find_keyboards(os.environ.get("HORUS_CONTROL_SYSFS", "/sys")) if k.config_interface]
+    kbs = [k for k in find_keyboards(os.environ.get("K609_SYSFS", "/sys")) if k.config_interface]
     if len(kbs) != 1:
         notify("Keyboard not found." if not kbs else "More than one K609GG is connected.", error=True)
         return 1
     try:
         profiles.apply(kbs[0].config_interface.devnode, p)
     except AccessDenied:
-        notify("Can't open the keyboard. Open Horus Control to see how to allow access.", error=True)
+        notify("Can't open the keyboard. Open Keyboard Control to see how to allow access.", error=True)
         return 1
     except (DeviceGone, OSError, ValueError, RuntimeError) as e:
         notify(f"Couldn't apply “{p.name}”: {e}", error=True)
@@ -92,9 +92,18 @@ def main() -> int:
     if "--apply-profile" in args:
         i = args.index("--apply-profile")
         if i + 1 >= len(args):
-            print("Usage: horus-control --apply-profile NAME", file=sys.stderr)
+            print("Usage: k609-keyboard-control --apply-profile NAME", file=sys.stderr)
             return 2
         return apply_profile(args[i + 1])
+    if "--smoke-test" in args:
+        # Opens the window, checks it draws, then quits: used by the release workflow on other distros.
+        os.environ["K609_SMOKE_TEST"] = "1"
+        from .app import main as gui
+        return gui()
+    if "--help" in args or "-h" in args:
+        print("Usage: k609-keyboard-control [--apply-profile NAME | --list-profiles | --inspect "
+              "[--read-features] [--read-lighting] | --version | --smoke-test]")
+        return 0
     if "--list-profiles" in args:
         from . import profiles
         for p in profiles.load_all():

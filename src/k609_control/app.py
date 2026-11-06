@@ -1,4 +1,4 @@
-"""Horus Control GTK 4 window. Never touches HID directly; uses device/hidraw helpers off the main thread."""
+"""Keyboard Control GTK 4 window. Never touches HID directly; uses device/hidraw helpers off the main thread."""
 
 from __future__ import annotations
 
@@ -406,7 +406,7 @@ class Window(Gtk.ApplicationWindow):
 
         def work():
             try:
-                result = find_keyboards(os.environ.get("HORUS_CONTROL_SYSFS", "/sys"))
+                result = find_keyboards(os.environ.get("K609_SYSFS", "/sys"))
             except Exception as e:  # sysfs oddities must never crash the UI
                 result = e
             GLib.idle_add(self._scan_done, result)
@@ -1092,7 +1092,7 @@ class Window(Gtk.ApplicationWindow):
         text, kind = self.keys_message
         if text:
             card.append(label(text, "small", kind))
-        card.append(label("The app keeps your macros in ~/.config/horus-control/macros.json, because "
+        card.append(label("The app keeps your macros in ~/.config/k609-keyboard-control/macros.json, because "
                           "the keyboard can't report them back. Applying macros here replaces macros set in "
                           "Redragon's software.", "small", "faint"))
         page.append(card)
@@ -1336,7 +1336,7 @@ class Window(Gtk.ApplicationWindow):
     @staticmethod
     def _binding(p) -> str:
         """A Hyprland line for this profile (F13 as a placeholder key)."""
-        exe = os.environ.get("APPIMAGE") or "horus-control"
+        exe = os.environ.get("APPIMAGE") or "k609-keyboard-control"
         return f'bind = , F13, exec, "{exe}" --apply-profile "{p.name}"\n'
 
     def _save_profile(self, iface):
@@ -1368,38 +1368,57 @@ class Window(Gtk.ApplicationWindow):
         store.append(f)
         return store
 
-    def _export_profile(self, p):
-        dlg = Gtk.FileDialog(title=f"Export profile “{p.name}”", initial_name=profiles.file_name(p.name),
-                             filters=self._json_filter())
+    def _choose_file(self, title, save, initial_name, on_path):
+        """A file dialog: Gtk.FileDialog on GTK 4.10+, Gtk.FileChooserNative on older GTK."""
+        if hasattr(Gtk, "FileDialog"):
+            dlg = Gtk.FileDialog(title=title, filters=self._json_filter())
+            if initial_name:
+                dlg.set_initial_name(initial_name)
 
-        def done(d, res):
+            def done(d, res):
+                try:
+                    f = d.save_finish(res) if save else d.open_finish(res)
+                except GLib.Error:
+                    return                      # cancelled
+                on_path(f.get_path())
+            (dlg.save if save else dlg.open)(self, None, done)
+            return
+        action = Gtk.FileChooserAction.SAVE if save else Gtk.FileChooserAction.OPEN
+        native = Gtk.FileChooserNative.new(title, self, action, None, None)
+        f = Gtk.FileFilter()
+        f.set_name("Profiles (JSON)")
+        f.add_pattern("*.json")
+        native.add_filter(f)
+        if initial_name and save:
+            native.set_current_name(initial_name)
+
+        def response(n, r):
+            if r == Gtk.ResponseType.ACCEPT and n.get_file() is not None:
+                on_path(n.get_file().get_path())
+            self._native = None
+        native.connect("response", response)
+        self._native = native                   # keep a reference while it's open
+        native.show()
+
+    def _export_profile(self, p):
+        def write(path):
             try:
-                f = d.save_finish(res)
-            except GLib.Error:
-                return                          # cancelled
-            try:
-                profiles.export_to(p, f.get_path())
-                self.profile_message = (f"Exported “{p.name}” to {f.get_path()}.", "dim")
+                profiles.export_to(p, path)
+                self.profile_message = (f"Exported “{p.name}” to {path}.", "dim")
             except (OSError, ValueError) as e:
                 self.profile_message = (f"Couldn't export it: {e}", "error-text")
             self.render()
-        dlg.save(self, None, done)
+        self._choose_file(f"Export profile “{p.name}”", True, profiles.file_name(p.name), write)
 
     def _import_profile(self):
-        dlg = Gtk.FileDialog(title="Import a profile", filters=self._json_filter())
-
-        def done(d, res):
+        def read(path):
             try:
-                f = d.open_finish(res)
-            except GLib.Error:
-                return
-            try:
-                p = profiles.import_from(f.get_path())
+                p = profiles.import_from(path)
                 self.profile_message = (f"Imported profile “{p.name}”. Apply it to write it to the keyboard.", "dim")
             except (OSError, ValueError) as e:
                 self.profile_message = (f"Couldn't import that file: {e}", "error-text")
             self.render()
-        dlg.open(self, None, done)
+        self._choose_file("Import a profile", False, None, read)
 
     def _delete_profile(self, p):
         try:
@@ -1592,7 +1611,7 @@ class Window(Gtk.ApplicationWindow):
 
     def _known_colour(self):
         """The Fixed on colour last sent from here, so saves can include it as the official
-        software does. None if Horus Control has never set one: the table isn't sent then."""
+        software does. None if Keyboard Control has never set one: the table isn't sent then."""
         fc = self.app.settings.fixed_colour
         return tuple(bytes.fromhex(fc)) if fc else None
 
@@ -1689,8 +1708,10 @@ class Window(Gtk.ApplicationWindow):
         page.append(section("About", None))
         about = vbox(6, "card")
         about.append(label(f"{APP_NAME} {__version__}", "heading"))
-        about.append(label(f"Lighting, key remapping, macros and profiles for the {COMMENT} over wired USB. "
-                           "Not made by Redragon. Settings are saved in ~/.config/horus-control/.", "small", "dim"))
+        about.append(label("Lighting, key remapping, macros and profiles for keyboards compatible with the "
+                           "Redragon Horus SE K609, over wired USB. Unofficial: not affiliated with or endorsed by "
+                           "Redragon. Written almost entirely by an AI assistant, directed and tested by HypestHyper. "
+                           "Settings are saved in ~/.config/k609-keyboard-control/.", "small", "dim"))
         page.append(about)
 
     def _accent_row(self) -> Gtk.Widget:
@@ -1771,17 +1792,29 @@ class App(Gtk.Application):
         """Keep (or remove) the launcher entry for the AppImage this was started from."""
         path = desktop.appimage_path()
         try:
+            desktop.remove_legacy()
             if self.settings.desktop_entry and path:
                 desktop.install(path)
             elif not self.settings.desktop_entry:
                 desktop.remove()
         except OSError as e:
-            print(f"horus-control: couldn't update the launcher entry: {e}", file=sys.stderr)
+            print(f"k609-keyboard-control: couldn't update the launcher entry: {e}", file=sys.stderr)
 
     def do_activate(self):
         if not self.window:
             self.window = Window(self)
         self.window.present()
+        if os.environ.get("K609_SMOKE_TEST"):
+            GLib.timeout_add(1500, self._smoke_done)
+
+    def _smoke_done(self):
+        w = self.window
+        ok = bool(w and w.get_mapped() and w.get_width() > 100 and w.get_height() > 100)
+        print(f"smoke test {'ok' if ok else 'FAILED'}: GTK {Gtk.get_major_version()}.{Gtk.get_minor_version()}."
+              f"{Gtk.get_micro_version()}, Python {sys.version.split()[0]}, window {w.get_width()}x{w.get_height()}")
+        self.smoke_ok = ok
+        self.quit()
+        return False
 
     def _watch_portal(self):
         try:
@@ -1817,10 +1850,13 @@ class App(Gtk.Application):
         reduce = self.settings.reduce_motion or not self.desktop_animations
         self.gtk_settings.set_property("gtk-enable-animations", not reduce)
         css = stylesheet(self.is_dark(), self.settings.size, reduce, self.settings.accent)
-        if hasattr(self.provider, "load_from_string"):
+        if hasattr(self.provider, "load_from_string"):          # GTK 4.12+
             self.provider.load_from_string(css)
         else:
-            self.provider.load_from_data(css, -1)
+            try:
+                self.provider.load_from_data(css, -1)              # GTK 4.0-4.8: (text, length)
+            except TypeError:
+                self.provider.load_from_data(css.encode())         # GTK 4.10-4.11: bytes
 
     def change(self, **values):
         for k, v in values.items():
@@ -1829,8 +1865,12 @@ class App(Gtk.Application):
         try:
             settings_mod.save(self.settings)
         except OSError as e:
-            print(f"horus-control: couldn't save settings: {e}", file=sys.stderr)
+            print(f"k609-keyboard-control: couldn't save settings: {e}", file=sys.stderr)
 
 
 def main() -> int:
-    return App().run(sys.argv)
+    app = App()
+    status = app.run([sys.argv[0]])
+    if os.environ.get("K609_SMOKE_TEST"):
+        return 0 if getattr(app, "smoke_ok", False) else 1
+    return status

@@ -134,7 +134,7 @@ def find_keyboards(sysfs: str = "/sys", dev: str = "/dev", access=_default_acces
 
 
 UDEV_RULE = """\
-# Horus Control: let the logged-in user open the K609GG configuration interface.
+# Keyboard Control: let the logged-in user open the K609GG configuration interface.
 # Wired USB 258a:0049, HID interface 1 only. Typing interface 0 is left alone.
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0049", ENV{HORUS_K609GG}="1"
 SUBSYSTEM=="hidraw", ENV{HORUS_K609GG}=="1", ATTRS{bInterfaceNumber}=="01", TAG+="uaccess"

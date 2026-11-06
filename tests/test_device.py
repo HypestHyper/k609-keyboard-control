@@ -2,7 +2,7 @@ import os
 
 from fixtures import IFACE0, IFACE1
 
-from horus_control.device import CONFIG_INTERFACE, find_keyboards
+from k609_control.device import CONFIG_INTERFACE, find_keyboards
 
 
 def make_tree(root, devices):
@@ -84,7 +84,7 @@ def test_corrupt_descriptor_is_reported_not_raised(tmp_path):
 def test_packaged_udev_rule_matches_app():
     from pathlib import Path
 
-    from horus_control.device import UDEV_RULE
+    from k609_control.device import UDEV_RULE
     rule = (Path(__file__).parent.parent / "packaging" / "70-horus-control.rules").read_text()
     assert rule == UDEV_RULE
     assert "0666" not in rule and 'ATTRS{bInterfaceNumber}=="01"' in rule

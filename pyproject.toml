@@ -1,12 +1,13 @@
 [project]
-name = "horus-control"
-version = "0.1.0"
-description = "Read-only inspector for the Redragon Horus SE K609GG over wired USB"
-requires-python = ">=3.11"
-# PyGObject + GTK 4 come from the system (Arch: python-gobject, gtk4). No other dependencies.
+name = "k609-keyboard-control"
+version = "0.12.0"
+description = "Unofficial lighting, key remapping and macro tool compatible with the Redragon Horus SE K609"
+requires-python = ">=3.10"
+license = "MIT"
+# PyGObject + GTK 4.6+ come from the system (or are bundled in the AppImage). No other dependencies.
 
 [project.scripts]
-horus-control = "horus_control.__main__:main"
+k609-keyboard-control = "k609_control.__main__:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

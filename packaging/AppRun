@@ -1,18 +1,32 @@
 #!/bin/sh
-# Horus Control AppImage entry point.
-# Uses the host's Python, GTK 4 and PyGObject (Arch: python-gobject, gtk4); bundles only the app.
+# Keyboard Control AppImage entry point. Everything except glibc, GPU drivers, X11/Wayland client
+# libraries and fonts is bundled: Python, PyGObject, GTK 4 and their libraries.
 HERE="$(dirname "$(readlink -f "$0")")"
-export PYTHONPATH="$HERE/usr/lib/horus-control"
-export PYTHONDONTWRITEBYTECODE=1
 
-for py in python3 python3.14 python3.13 python3.12 python3.11; do
-    if command -v "$py" >/dev/null 2>&1 &&
-       "$py" -c "import gi; gi.require_version('Gtk', '4.0')" >/dev/null 2>&1; then
-        exec "$py" -s -m horus_control "$@"
-    fi
+# Remember the host's values so programs the app starts (notify-send) get the host's own libraries.
+for v in LD_LIBRARY_PATH PYTHONHOME PYTHONPATH GI_TYPELIB_PATH GDK_PIXBUF_MODULE_FILE GTK_EXE_PREFIX \
+         GTK_DATA_PREFIX GIO_MODULE_DIR XDG_DATA_DIRS; do
+    eval "val=\${$v-__unset__}"
+    export "K609_HOST_$v=$val"
 done
 
-msg="Horus Control needs Python with GTK 4 and PyGObject. On Arch/CachyOS: sudo pacman -S --needed python-gobject gtk4"
-echo "$msg" >&2
-command -v notify-send >/dev/null 2>&1 && notify-send "Horus Control can't start" "$msg"
-exit 1
+PY="$(ls "$HERE/usr/bin" | grep -E '^python3\.[0-9]+$' | head -n1)"
+export PYTHONHOME="$HERE/usr"
+export PYTHONPATH="$HERE/usr/lib/k609-keyboard-control:$HERE/usr/lib/python3/dist-packages"
+export PYTHONDONTWRITEBYTECODE=1
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export GI_TYPELIB_PATH="$HERE/usr/lib/girepository-1.0"
+export GTK_EXE_PREFIX="$HERE/usr"          # keep GTK from loading the host's GTK modules
+export GTK_DATA_PREFIX="$HERE/usr"
+export GIO_MODULE_DIR="$HERE/usr/lib/gio/modules"   # likewise for GIO modules (none bundled)
+export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+cache_dir="${XDG_RUNTIME_DIR:-/tmp}"
+cache="$cache_dir/k609-keyboard-control-pixbuf-loaders.$$.cache"
+sed "s|@APPDIR@|$HERE|g" "$HERE/usr/lib/gdk-pixbuf/loaders.cache.in" > "$cache" 2>/dev/null && \
+    export GDK_PIXBUF_MODULE_FILE="$cache"
+
+"$HERE/usr/bin/$PY" -s -m k609_control "$@"
+status=$?
+rm -f "$cache"
+exit $status

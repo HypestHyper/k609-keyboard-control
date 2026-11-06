@@ -3,8 +3,8 @@ import errno
 import pytest
 from fixtures import IFACE0, IFACE1
 
-from horus_control import hidraw
-from horus_control.hidraw import AccessDenied, DeviceGone, Report, parse_descriptor
+from k609_control import hidraw
+from k609_control.hidraw import AccessDenied, DeviceGone, Report, parse_descriptor
 
 
 def test_interface1_feature_reports_sized_from_descriptor():

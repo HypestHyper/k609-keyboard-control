@@ -1,6 +1,7 @@
-# Horus Control — notes for agents
+# Keyboard Control — notes for agents
 
-- Spec: the Horus Control handover brief. UI follows the GTK App Family design language. Neither file is in this repo; ask the user if you need them.
+- App: Keyboard Control, unofficial tool for the Redragon Horus SE K609 (public repo HypestHyper/k609-keyboard-control).
+- Spec: the original handover brief ("Horus Control"). UI follows the GTK App Family design language. Neither file is in this repo; ask the user if you need them.
 - **Never add a HID write** (SET_FEATURE, output report, write()) until a K609GG protocol is
   proven with evidence and the user has reviewed it. Approved so far: the read command in
   `hidraw.ALLOWED_COMMANDS` (`05 83 c6 00 00 00` lighting, `05 84 d8 00 00 00` key map), plus these writes,
@@ -18,6 +19,7 @@
 Documented exceptions to the family design language:
 - Fonts/icons: system font with "Google Sans Flex" preferred if installed; standard
   symbolic icons instead of bundled Material Symbols (not bundled, to keep v0.1 small).
-- AppImage uses the host GTK 4/PyGObject (see README).
+- The AppImage bundles Python, PyGObject and GTK 4 (tools/make_appdir.py, built on Ubuntu 22.04);
+  code must keep working with GTK 4.6 and Python 3.10.
 - Switch on-state thumb 20 px (provisional in the family spec).
 - No automatic compact breakpoint; size is a setting.

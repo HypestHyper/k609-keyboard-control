@@ -1,4 +1,4 @@
-"""App settings in ~/.config/horus-control/settings.json, written atomically."""
+"""App settings in ~/.config/k609-keyboard-control/settings.json, written atomically."""
 
 from __future__ import annotations
 
@@ -14,7 +14,14 @@ SIZES = ("compact", "default", "large")
 
 def config_dir() -> str:
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(base, "horus-control")
+    path = os.path.join(base, "k609-keyboard-control")
+    old = os.path.join(base, "horus-control")          # folder used before the app was renamed
+    if not os.path.exists(path) and os.path.isdir(old):
+        try:
+            os.rename(old, path)
+        except OSError:
+            return old
+    return path
 
 
 @dataclass

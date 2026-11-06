@@ -1,0 +1,112 @@
+name: Release
+
+# Builds the self-contained AppImage on Ubuntu 22.04, starts it on several distros, then attaches it
+# and the notes from that version's section in CHANGELOG.md to a GitHub release. Runs when a tag like
+# v0.12.0 is pushed, or by hand (Actions tab, Release, Run workflow), which uses the version in
+# src/k609_control/__init__.py. An existing release gets its notes and AppImage replaced.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Work out the version
+        id: version
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/k609_control/__init__.py)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match the version $v in src/k609_control/__init__.py"; exit 1
+          fi
+          grep -q "^## $v " CHANGELOG.md || { echo "CHANGELOG.md has no '## $v' section"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Run the tests
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 -m pytest -q
+      - name: Build the AppImage
+        run: sh tools/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb libgl1 libegl1 libfontconfig1 fonts-dejavu-core libwayland-client0 libfribidi0 libharfbuzz0b
+          - image: ubuntu:24.04
+            install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb libgl1 libegl1 libfontconfig1 fonts-dejavu-core libwayland-client0 libfribidi0 libharfbuzz0b
+          - image: debian:12
+            install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb libgl1 libegl1 libfontconfig1 fonts-dejavu-core libwayland-client0 libfribidi0 libharfbuzz0b
+          - image: fedora:latest
+            install: dnf install -y -q xorg-x11-server-Xvfb mesa-libGL mesa-libEGL fontconfig dejavu-sans-fonts libwayland-client fribidi harfbuzz
+          - image: archlinux:latest
+            install: pacman -Syu --noconfirm --quiet xorg-server-xvfb mesa fontconfig ttf-dejavu wayland fribidi harfbuzz
+          - image: opensuse/tumbleweed
+            install: zypper --non-interactive --quiet install xorg-x11-server-Xvfb Mesa-libGL1 Mesa-libEGL1 fontconfig dejavu-fonts libwayland-client0 fribidi libharfbuzz0
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+      - name: Install a bare desktop (X server, GPU and font libraries)
+        run: ${{ matrix.install }}
+      - name: Start the app
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+        run: |
+          chmod +x ./*.AppImage
+          Xvfb :99 -screen 0 1280x1024x24 >/dev/null 2>&1 &
+          sleep 3
+          export DISPLAY=:99
+          ./*.AppImage --version
+          ./*.AppImage --smoke-test
+
+  release:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          awk -v head="## $VERSION " 'index($0, head) == 1 {on = 1; next} /^## / {on = 0} on' CHANGELOG.md > notes.md
+          cat >> notes.md <<NOTES
+
+          ## Install
+
+          Download **K609_Keyboard_Control-$VERSION-x86_64.AppImage** below, then:
+
+              chmod +x K609_Keyboard_Control-$VERSION-x86_64.AppImage
+              ./K609_Keyboard_Control-$VERSION-x86_64.AppImage
+
+          The first start adds **Keyboard Control** to your app launcher. See the README for the one-time
+          keyboard permission (udev rule).
+          NOTES
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" --title "Keyboard Control $VERSION" --notes-file notes.md
+          fi
+          gh release upload "v$VERSION" ./*.AppImage --clobber

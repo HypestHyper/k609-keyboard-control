@@ -237,7 +237,7 @@ BLOCK_LEN = 262            # meaningful bytes in the lighting block, header incl
 
 
 def is_lighting_write(buf: bytes) -> bool:
-    """The only shape of SET_FEATURE 0x06 Horus Control may send: the lighting block saved back,
+    """The only shape of SET_FEATURE 0x06 Keyboard Control may send: the lighting block saved back,
     as the official software does (06 03 c6, block marker 5a a5, zero padding to 1032 bytes)."""
     return (len(buf) == BLOCK_BUFFER_LEN and buf[:3] == LIGHTING_WRITE_HEADER
             and buf[14:16] == b"\x5a\xa5" and not any(buf[BLOCK_LEN:]))

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from horus_control import capabilities, settings, style
+from k609_control import capabilities, settings, style
 
 
 def test_unknown_capabilities_cannot_run():
@@ -17,7 +17,7 @@ def test_unknown_capabilities_cannot_run():
 
 
 def test_lighting_writes_are_gated(monkeypatch):
-    from horus_control import lighting
+    from k609_control import lighting
     unknown = capabilities.Capability("lighting", "x", capabilities.Status.UNKNOWN, "")
     monkeypatch.setattr(capabilities, "CAPABILITIES", (unknown,))
     with pytest.raises(capabilities.NotVerified):
@@ -25,7 +25,7 @@ def test_lighting_writes_are_gated(monkeypatch):
 
 
 def test_settings_roundtrip_and_atomic(tmp_path):
-    path = tmp_path / "horus-control" / "settings.json"
+    path = tmp_path / "k609-keyboard-control" / "settings.json"
     assert not path.parent.exists()
     assert settings.load(str(path)) == settings.Settings()   # loading creates nothing
     assert not path.parent.exists()
@@ -75,15 +75,25 @@ def test_stylesheet_scales():
 
 
 def test_launcher_entry(tmp_path, monkeypatch):
-    from horus_control import desktop
+    from k609_control import desktop
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert desktop.install("/home/me/Apps/Keyboard Control.AppImage")
     text = open(desktop.entry_path()).read()
-    assert "\nName=Keyboard Control\n" in text and "Comment=Redragon Horus SE K609" in text
-    assert "GenericName=Redragon Horus SE K609 Keyboard Control" in text
+    assert "\nName=Keyboard Control\n" in text and "Comment=Lighting, keys and macros for the Redragon Horus SE K609" in text
+    assert "GenericName=Horus SE K609 Keyboard Control" in text
     assert 'Exec="/home/me/Apps/Keyboard Control.AppImage"' in text and "Keywords=keyboard;Redragon;" in text
     assert open(desktop.icon_path(), "rb").read() == open(desktop.ICON_SOURCE, "rb").read()
     assert not desktop.install("/home/me/Apps/Keyboard Control.AppImage")      # unchanged
     assert desktop.install("/elsewhere/k.AppImage")                              # follows a move
     desktop.remove()
     assert not desktop.installed()
+
+
+
+def test_old_settings_folder_moves(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    (tmp_path / "horus-control" / "profiles").mkdir(parents=True)
+    (tmp_path / "horus-control" / "settings.json").write_text("{}")
+    assert settings.config_dir() == str(tmp_path / "k609-keyboard-control")
+    assert (tmp_path / "k609-keyboard-control" / "settings.json").exists()
+    assert not (tmp_path / "horus-control").exists()

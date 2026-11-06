@@ -8,7 +8,7 @@ Decoded on 2026-11-06 from four macros saved by the official software:
 - A key that plays a macro has key map entry 10 00 <mode> <0x18 + slot>; mode 01 repeats it the
   slot's count of times, 04 repeats it while the key is held.
 - Saving: read the key map, write the macro block, then write the key map.
-The keyboard has no known way to report macros back, so Horus Control keeps its own copy.
+The keyboard has no known way to report macros back, so Keyboard Control keeps its own copy.
 """
 
 from __future__ import annotations

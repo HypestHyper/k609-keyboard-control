@@ -1,4 +1,4 @@
-"""Profiles stored by Horus Control: lighting, key remaps and macros, applied together.
+"""Profiles stored by Keyboard Control: lighting, key remaps and macros, applied together.
 
 The keyboard has no profiles of its own: the official software's Profile 1/2/3 buttons rewrite the
 colour table, key map and lighting block from its own copy (USB recording, 2026-11-06). Horus
@@ -119,7 +119,7 @@ def delete(name: str, folder: str | None = None) -> None:
 
 
 def capture(devnode: str, name: str, colour: str | None, current_macros: list[macros.Macro], **io) -> Profile:
-    """Read the keyboard's lighting and keys; macros and colour come from Horus Control's own copy."""
+    """Read the keyboard's lighting and keys; macros and colour come from Keyboard Control's own copy."""
     st = lighting.read_state(devnode, **io)
     keys = keymap.read(devnode, **io)
     assigned = {m.key for m in current_macros if m.key}

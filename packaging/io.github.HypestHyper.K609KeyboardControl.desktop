@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Keyboard Control
+GenericName=Horus SE K609 Keyboard Control
+Comment=Lighting, keys and macros for the Redragon Horus SE K609 (unofficial)
+Exec=k609-keyboard-control
+Icon=k609-keyboard-control
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=keyboard;Redragon;Horus;K609;K609GG;RGB;lighting;backlight;macro;macros;remap;keys;profiles;
+StartupWMClass=io.github.HypestHyper.K609KeyboardControl

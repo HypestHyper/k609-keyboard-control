@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from horus_control import hidraw, keymap
+from k609_control import hidraw, keymap
 
 # The key map read from the user's keyboard on 2026-11-06, default layout.
 DEFAULT = bytes.fromhex(open(os.path.join(os.path.dirname(__file__), "keymap_default.hex")).read())
