@@ -16,6 +16,11 @@ on:
 permissions:
   contents: write
 
+# One release at a time, so an older version can't finish after a newer one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -133,3 +138,17 @@ jobs:
             gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Keyboard Control $VERSION" --notes-file notes.md
           fi
           gh release upload "v$VERSION" ./*.AppImage --clobber
+
+  latest:
+    # Always mark the highest version as Latest (GitHub marks the most recently published one).
+    needs: [build, release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark the newest version as Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft,isPrerelease \
+                  --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName' | sort -V | tail -n1)
+          if [ -n "$tag" ]; then gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --latest; fi
