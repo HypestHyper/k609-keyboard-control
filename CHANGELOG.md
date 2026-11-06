@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.4 (2026-11-06)
+
+- Removed the Features list from the Keyboard tab.
+
 ## 0.13.3 (2026-11-06)
 
 - Scrolling over the colour sliders and the macro number boxes scrolls the page instead of changing the value.

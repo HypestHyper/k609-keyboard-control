@@ -488,9 +488,6 @@ class Window(Gtk.ApplicationWindow):
         page.append(section("Read from the keyboard", "Reads the lighting settings or the key map the same "
                                                       "way Redragon's software does. Nothing is changed."))
         page.append(self._reports_card(iface))
-        page.append(section("Features", "Controls appear here only after they are proven to work "
-                                        "on this keyboard."))
-        page.append(self._features_card())
 
     def _empty(self) -> Gtk.Widget:
         box = vbox(8)
@@ -690,28 +687,6 @@ class Window(Gtk.ApplicationWindow):
         exp.set_child(details)
         card.append(exp)
         return card
-
-    def _features_card(self) -> Gtk.Widget:
-        card = vbox(10, "card")
-        for i, cap in enumerate(capabilities.CAPABILITIES):
-            if i:
-                card.append(Gtk.Box(css_classes=["divider"]))
-            row = hbox(12)
-            text = vbox(2)
-            text.set_hexpand(True)
-            text.append(label(cap.title, "heading"))
-            text.append(label(cap.evidence, "small", "dim"))
-            row.append(text)
-            usable = cap.status in (capabilities.Status.HARDWARE, capabilities.Status.HOST)
-            where = {"remapping": "On the Keys tab", "macros": "On the Macros tab",
-                     "profiles": "On the Profiles tab"}.get(cap.key, "On the Lighting tab")
-            c = chip(where, "ok") if usable else chip("Not yet verified", "neutral")
-            c.set_valign(Gtk.Align.CENTER)
-            row.append(c)
-            card.append(row)
-        return card
-
-    # --- actions ----------------------------------------------------------------
 
     def _read_current(self):
         kb = self.current()
