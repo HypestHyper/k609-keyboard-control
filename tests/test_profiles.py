@@ -106,3 +106,10 @@ def test_export_import(tmp_path):
     (tmp_path / "bad.json").write_text(json.dumps({"version": 1, "name": "x"}))
     with pytest.raises(ValueError):
         profiles.import_from(str(tmp_path / "bad.json"), str(store))
+
+
+
+def test_profile_keeps_selfdefine_colours(tmp_path):
+    p = profiles.Profile("Paint", 0x15, {e: 0x44 for e in range(1, 0x13)}, None, {}, [], {1: (255, 0, 0)})
+    profiles.save(p, str(tmp_path))
+    assert profiles.find("Paint", str(tmp_path)).selfdef == {1: (255, 0, 0)}

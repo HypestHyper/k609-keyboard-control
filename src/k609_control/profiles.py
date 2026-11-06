@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from . import keymap, lighting, macros
+from . import keymap, lighting, macros, selfdefine
 from .settings import atomic_write_json, config_dir
 
 SCHEMA_VERSION = 1
@@ -26,11 +26,13 @@ class Profile:
     colour: str | None                      # Fixed on colour "rrggbb", if known
     keys: dict[str, int]                    # key name -> USB code (normal keys and modifiers)
     macros: list[macros.Macro] = field(default_factory=list)   # with their key assignments
+    selfdef: dict[int, tuple[int, int, int]] = field(default_factory=dict)   # Self define key colours
 
     def to_dict(self) -> dict:
         return {"version": SCHEMA_VERSION, "name": self.name, "effect": self.effect,
                 "levels": {f"{e:02x}": v for e, v in self.levels.items()}, "colour": self.colour,
-                "keys": self.keys, "macros": [m.to_dict() for m in self.macros]}
+                "keys": self.keys, "macros": [m.to_dict() for m in self.macros],
+                "selfdefine": selfdefine.to_json(self.selfdef)}
 
 
 def profiles_dir() -> str:
@@ -77,7 +79,8 @@ def from_dict(data) -> Profile:
                                item.get("key") if item.get("key") in names else None))
     p = Profile(str(data["name"]), int(data["effect"]),
                 {int(k, 16): int(v) for k, v in data["levels"].items()},
-                data.get("colour"), {str(k): int(v) for k, v in data["keys"].items()}, ms)
+                data.get("colour"), {str(k): int(v) for k, v in data["keys"].items()}, ms,
+                selfdefine.from_json(data.get("selfdefine", {})))
     validate(p)
     return p
 
@@ -118,7 +121,8 @@ def delete(name: str, folder: str | None = None) -> None:
     os.remove(os.path.join(folder or profiles_dir(), file_name(name)))
 
 
-def capture(devnode: str, name: str, colour: str | None, current_macros: list[macros.Macro], **io) -> Profile:
+def capture(devnode: str, name: str, colour: str | None, current_macros: list[macros.Macro],
+            selfdef: dict | None = None, **io) -> Profile:
     """Read the keyboard's lighting and keys; macros and colour come from Keyboard Control's own copy."""
     st = lighting.read_state(devnode, **io)
     keys = keymap.read(devnode, **io)
@@ -126,7 +130,7 @@ def capture(devnode: str, name: str, colour: str | None, current_macros: list[ma
     normal = {k: c for k, c in keys.items() if c < keymap.MACRO_CODE and k not in assigned}
     p = Profile(name, st.effect, dict(st.levels), colour, normal,
                 [macros.Macro(m.name, [macros.Step(s.key, s.down, s.pause) for s in m.steps], m.held, m.count, m.key)
-                 for m in current_macros])
+                 for m in current_macros], dict(selfdef or {}))
     validate(p)
     return p
 
@@ -136,6 +140,8 @@ def apply(devnode: str, p: Profile, **io) -> None:
     validate(p)
     rgb = tuple(bytes.fromhex(p.colour)) if p.colour else None
     lighting.apply(devnode, effect=p.effect, levels=p.levels, colour=rgb, **io)
+    if p.effect == lighting.SELF_DEFINE and p.selfdef:
+        selfdefine.apply(devnode, p.selfdef, **io)
     macro_keys = {m.key for m in p.macros if m.key}
     changes = {k.name: p.keys.get(k.name, k.default) for k in keymap.REMAPPABLE if k.name not in macro_keys}
     keymap.remap(devnode, changes, **io)

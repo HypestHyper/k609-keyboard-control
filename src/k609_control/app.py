@@ -12,11 +12,11 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import __version__, capabilities, keymap, lighting, macros, profiles, settings as settings_mod  # noqa: E402
+from . import __version__, capabilities, keymap, lighting, macros, profiles, selfdefine, settings as settings_mod  # noqa: E402
 from .device import CONFIG_INTERFACE, UDEV_RULE, Keyboard, find_keyboards  # noqa: E402
 from .hidraw import (AccessDenied, DeviceGone, Handle, WriteFailed, describe_diff, describe_keymap_diff,
                      diff_blocks, hexdump, read_keymap_block, read_lighting_block)  # noqa: E402
-from .colourpicker import ColourPicker  # noqa: E402
+from .colourpicker import ColourPicker, KeyColour, readable_on  # noqa: E402
 from .style import stylesheet  # noqa: E402
 
 from . import APP_ID, APP_NAME, COMMENT, desktop  # noqa: E402
@@ -334,6 +334,10 @@ class Window(Gtk.ApplicationWindow):
         self.light_message = ("", "dim")
         self.picker_rgb = None                  # colour shown in the Fixed on colour picker
         self.autoloaded = {}                    # tab -> devnode already read automatically
+        self.selfdef = selfdefine.load()        # key number -> (r, g, b), last sent or being edited
+        self.selfdef_dirty = False
+        self.paint_rgb = (255, 255, 255)
+        self.selfdef_view = KeyboardView()
         self.settings_page = self._page("settings")
         self._build_settings()
         self.tabs[0].set_active(True)
@@ -1348,7 +1352,8 @@ class Window(Gtk.ApplicationWindow):
         existing = profiles.find(name)
         colour = self.app.settings.fixed_colour or None
         current = list(self.macro_list)
-        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current,
+        selfdef = dict(self.selfdef)
+        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current, selfdef,
                                                                             handle=self.handle)),
                           lambda _r: f"{'Updated' if existing else 'Saved'} profile “{name}”.",
                           clear_name=True)
@@ -1460,6 +1465,9 @@ class Window(Gtk.ApplicationWindow):
                 if r.colour:
                     self.app.change(fixed_colour=r.colour)
                     self.picker_rgb = None
+                if r.selfdef:
+                    self.selfdef = dict(r.selfdef)
+                    selfdefine.save(self.selfdef)
                 self.keys_state = None          # reload from the keyboard next time
                 self.light_state = None
                 self.autoloaded.clear()
@@ -1510,9 +1518,10 @@ class Window(Gtk.ApplicationWindow):
             dd.connect("notify::selected", lambda d, _p: self._set_light(
                 iface, f"Set {lighting.EFFECTS[codes[d.get_selected()]]}.", effect=codes[d.get_selected()]))
             effect_box.append(dd)
-            if st.effect == lighting.SELF_DEFINE:
-                effect_box.append(label("Shows the per-key colours set in Redragon's software.", "small", "dim"))
             card.append(effect_box)
+            if st.effect == lighting.SELF_DEFINE:
+                card.append(Gtk.Box(css_classes=["divider"]))
+                card.append(self._selfdefine_section(iface))
             if st.effect == 0x01:
                 card.append(Gtk.Box(css_classes=["divider"]))
                 card.append(self._colour_section(iface))
@@ -1555,6 +1564,85 @@ class Window(Gtk.ApplicationWindow):
             rc.append(label("Before your first change, the app saves the keyboard's effect, brightness "
                             "and speed so you can put them back here.", "small", "dim"))
         page.append(rc)
+
+    def _selfdefine_section(self, iface) -> Gtk.Widget:
+        box = vbox(10)
+        box.append(label("Key colours", "heading"))
+        box.append(label("Click keys to paint them with the colour below, then send. The keyboard can't report "
+                         "its key colours, so this shows what was last sent from this app.", "small", "dim"))
+        by_number = {k.number: k for k in keymap.KEYS}
+        buttons = []
+        for number, rect in keymap.LAYOUT.items():
+            k = by_number.get(number)
+            name = k.name if k else keymap.SPECIAL[number]
+            rgb = self.selfdef.get(number, (0, 0, 0))
+            btn = Gtk.Button()
+            btn.add_css_class("keycap")
+            btn.add_css_class("paint")
+            fill = KeyColour(rgb)
+            overlay = Gtk.Overlay()
+            overlay.set_child(fill)
+            cap = label(keymap.CAP_LABELS.get(name, name) if k else name, f"text-on-{readable_on(rgb)}",
+                        xalign=0.5, wrap=False)
+            cap.set_halign(Gtk.Align.CENTER)
+            cap.set_valign(Gtk.Align.CENTER)
+            overlay.add_overlay(cap)
+            btn.set_child(overlay)
+            set_accessible_label(btn, f"Paint {name}")
+            btn.set_tooltip_text(f"{name}: #{bytes(rgb).hex()}")
+            btn.connect("clicked", lambda b, n=number, f=fill, c=cap, nm=name: self._paint_key(n, f, c, b, nm))
+            buttons.append((btn, rect))
+        if (parent := self.selfdef_view.get_parent()) is not None:
+            parent.remove(self.selfdef_view)
+        self.selfdef_view.set_keys(buttons)
+        box.append(self.selfdef_view)
+        box.append(label("Paint colour", "heading"))
+        box.append(ColourPicker(self.paint_rgb, lambda rgb: self._paint_all(rgb), apply_label="Paint all keys",
+                                on_change=lambda rgb: setattr(self, "paint_rgb", rgb)))
+        row = hbox(10)
+        send = Gtk.Button(label="Send to keyboard")
+        send.add_css_class("filled")
+        send.set_sensitive(not self.light_busy)
+        send.connect("clicked", lambda *_: self._send_selfdef(iface))
+        row.append(send)
+        clear_btn = Gtk.Button(label="Clear all")
+        clear_btn.add_css_class("text")
+        clear_btn.set_tooltip_text("Sets every key to black in the editor; Send to keyboard to apply")
+        clear_btn.connect("clicked", lambda *_: self._paint_all((0, 0, 0)))
+        row.append(clear_btn)
+        if self.selfdef_dirty:
+            hint = label("Not sent yet.", "small", "dim")
+            hint.set_valign(Gtk.Align.CENTER)
+            row.append(hint)
+        box.append(row)
+        return box
+
+    def _paint_key(self, number, fill, cap, button, name):
+        rgb = tuple(self.paint_rgb)
+        self.selfdef[number] = rgb
+        fill.set_rgb(rgb)
+        for side in ("dark", "light"):
+            cap.remove_css_class(f"text-on-{side}")
+        cap.add_css_class(f"text-on-{readable_on(rgb)}")
+        button.set_tooltip_text(f"{name}: #{bytes(rgb).hex()}")
+        if not self.selfdef_dirty:
+            self.selfdef_dirty = True
+            GLib.idle_add(lambda: (self.render(), False)[1])
+
+    def _paint_all(self, rgb):
+        self.selfdef = {n: tuple(rgb) for n in keymap.LAYOUT}
+        self.selfdef_dirty = True
+        self.render()
+
+    def _send_selfdef(self, iface):
+        colours = dict(self.selfdef)
+
+        def job():
+            st = selfdefine.apply(iface.devnode, colours, handle=self.handle)
+            selfdefine.save(colours)
+            self.selfdef_dirty = False
+            return st
+        self._light_run(job, lambda st: "Sent the key colours.")
 
     def _colour_section(self, iface) -> Gtk.Widget:
         from .style import SWATCHES

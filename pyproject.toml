@@ -1,6 +1,6 @@
 [project]
 name = "k609-keyboard-control"
-version = "0.12.0"
+version = "0.13.0"
 description = "Unofficial lighting, key remapping and macro tool compatible with the Redragon Horus SE K609"
 requires-python = ">=3.10"
 license = "MIT"

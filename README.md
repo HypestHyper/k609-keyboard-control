@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.12.0" src="https://img.shields.io/badge/version-0.12.0-4d7cff">
+  <img alt="Version 0.13.0" src="https://img.shields.io/badge/version-0.13.0-4d7cff">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="AppImage" src="https://img.shields.io/badge/package-AppImage-2b88d8">
@@ -33,7 +33,8 @@
 
 ## Features
 
-- **Lighting:** all 18 effects plus off and self-defined, brightness and speed for each effect, and the Fixed on colour with a colour wheel, RGB sliders and hex entry.
+- **Lighting:** all 18 effects, brightness and speed for each effect, and the Fixed on colour with a colour wheel, RGB sliders and hex entry.
+- **Per-key RGB (Self define):** paint each key its own colour on a picture of the keyboard.
 - **Key remapping:** click a key on a picture of the keyboard and choose what it sends: letters, F1–F24, navigation keys, modifiers (Caps Lock to Ctrl), or a macro. Fn stays locked so you can't lose its shortcuts.
 - **Macros:** key presses and releases with pauses, repeated a number of times or while held, stored in the keyboard.
 - **Profiles:** save lighting, keys and macros together, switch with one click or a keyboard shortcut, and export or import them as files.

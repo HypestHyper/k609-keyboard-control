@@ -156,10 +156,14 @@ window.horus.chooser { background-color: transparent; }
 window.horus button.chooser-key { min-height: px(34)px; padding: 0 px(6)px; }
 window.horus scale { padding: px(8)px 0; }
 window.horus scale trough { min-height: px(6)px; border-radius: 999px; border: none; background-color: @SURFACE_CONTAINER_HIGHEST; background-image: none; box-shadow: none; outline: none; }
-window.horus scale highlight { border-radius: 999px; background-color: @PRIMARY; background-image: none; border: none; }
+window.horus scale highlight { border-radius: 999px; background-color: @PRIMARY; background-image: none; border: none; margin: 0; padding: 0; min-width: 0; min-height: px(6)px; }
 window.horus scale slider { min-width: px(18)px; min-height: px(18)px; margin: -px(6)px; border-radius: 999px; border: none; box-shadow: none; background-image: none; background-color: @PRIMARY; }
 window.horus scale:focus-visible slider { outline: 2px solid @PRIMARY; outline-offset: 2px; }
 window.horus scale value { color: @ON_SURFACE_VARIANT; font-feature-settings: "tnum"; min-width: px(28)px; }
+window.horus button.keycap.paint { padding: px(3)px; }
+window.horus button.keycap.paint label { font-weight: 700; }
+window.horus .text-on-dark { color: #ffffff; }
+window.horus .text-on-light { color: #1b1b1f; }
 .keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
 
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }

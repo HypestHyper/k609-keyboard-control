@@ -27,6 +27,8 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("lighting_colour", "Fixed on colour", Status.HARDWARE,
                "Bytes 29–31 of the colour table, from three recordings of Redragon's software. "
                "Other effects' colours aren't decoded."),
+    Capability("selfdefine", "Self define (per-key colours)", Status.HARDWARE,
+               "A colour for every key, from a recording of Redragon's software painting keys."),
     Capability("remapping", "Key remapping", Status.HARDWARE,
                "Every key except Fn, to normal keys or modifiers. Key positions decoded from the key "
                "map and recorded remaps. Media keys aren't supported yet."),

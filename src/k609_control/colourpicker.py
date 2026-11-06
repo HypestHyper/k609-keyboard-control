@@ -276,3 +276,33 @@ class Swatch(Gtk.Widget):
         snap.push_rounded_clip(rounded(0, 0, w, h, 8))
         snap.append_color(rgba(*(c / 255 for c in self.picker.rgb)), rect(0, 0, w, h))
         snap.pop()
+
+
+class KeyColour(Gtk.Widget):
+    """A rounded fill in a key's true colour (Self define editor)."""
+
+    def __init__(self, rgb=(0, 0, 0)):
+        super().__init__()
+        self.rgb = tuple(rgb)
+
+    def set_rgb(self, rgb):
+        self.rgb = tuple(rgb)
+        self.queue_draw()
+
+    def do_measure(self, orientation, for_size):
+        return 0, 0, -1, -1
+
+    def do_snapshot(self, snap):
+        w, h = self.get_width(), self.get_height()
+        snap.push_rounded_clip(rounded(0, 0, w, h, 6))
+        snap.append_color(rgba(*(c / 255 for c in self.rgb)), rect(0, 0, w, h))
+        snap.pop()
+
+
+def readable_on(rgb) -> str:
+    """'dark' or 'light' text for a label drawn on this colour (luminance threshold 0.45)."""
+    def ch(c):
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    lum = 0.2126 * ch(rgb[0]) + 0.7152 * ch(rgb[1]) + 0.0722 * ch(rgb[2])
+    return "dark" if lum > 0.45 else "light"

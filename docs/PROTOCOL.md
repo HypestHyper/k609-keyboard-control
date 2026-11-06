@@ -107,3 +107,11 @@ bind = , F13, exec, "/path/to/Horus_Control.AppImage" --apply-profile "Gaming"
 Profiles can be exported to a file and imported again (Profiles tab). An imported profile whose
 name is taken gets a number added.
 
+## Self define (per-key colours)
+
+Saved with two tables. `06 09 cc 00 40 …` starts with three 126-byte planes (red, green, blue)
+after its 8-byte header; a key's byte is its colour index from Redragon's `Cfg.ini` (the second
+number of its key entry), so Esc (21) red is byte 29 and A (64) green is byte 8 + 126 + 64 = 198.
+The rest of that table and all of `06 09 d0 …` never change and are sent as recorded. Order: read
+the lighting block, 20 ms, colour table, 50 ms, second table, 50 ms, lighting block with effect
+`15` (Self define). The colours can't be read back.

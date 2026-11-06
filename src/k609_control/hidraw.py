@@ -5,8 +5,9 @@ official Redragon software: a command from ALLOWED_COMMANDS on report 0x05 (the
 read request); the lighting block saved back on report 0x06, checked by
 is_lighting_write(); and the colour table on report 0x06, which must equal the
 recorded table except for the Fixed on colour (is_colour_table_write()); and the key map
-saved back on report 0x06 (is_keymap_write(); only keymap.py builds it); and the macro block
-(is_macro_write(); only macros.py builds it).
+saved back on report 0x06 (is_keymap_write(); only keymap.py builds it); the macro block
+(is_macro_write(); only macros.py builds it); and the two Self define tables, which must equal the
+recorded ones outside the per-key colour planes (selfdefine.py).
 There is no output-report or write() call anywhere.
 """
 
@@ -424,6 +425,21 @@ class Session:
         except OSError as e:
             self._gone(e)
             raise WriteFailed(os.strerror(e.errno or 0)) from e
+
+    def write_selfdefine(self, colour_table: bytes, second_table: bytes) -> None:
+        """The two Self define tables, each checked against the recorded one (selfdefine.py)."""
+        from . import selfdefine
+        if not selfdefine.is_colour_table_write(colour_table) or not selfdefine.is_second_table_write(second_table):
+            raise ValueError("not the recorded Self define tables")
+        for i, payload in enumerate((colour_table, second_table)):
+            if i:
+                self._sleep(selfdefine.GAP_BETWEEN)
+            buf = bytearray(payload)
+            try:
+                self._ioctl(self.fd, hidiocsfeature(len(buf)), buf, True)
+            except OSError as e:
+                self._gone(e)
+                raise WriteFailed(os.strerror(e.errno or 0)) from e
 
     def pause(self, seconds: float) -> None:
         self._sleep(seconds)
