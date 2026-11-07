@@ -38,6 +38,7 @@ class Settings:
     fixed_colour: str = ""            # last Fixed on colour sent, "rrggbb"; the keyboard can't report it
     desktop_entry: bool = True        # keep a launcher entry for the AppImage in ~/.local/share
     accent: str = "4d7cff"            # UI accent seed, "rrggbb"
+    debug_tools: bool = False         # show the raw reports and change log at the bottom of Settings
     recent_colours: list = field(default_factory=list)   # last colours used in the colour pickers, "rrggbb"
 
     @classmethod
@@ -51,6 +52,8 @@ class Settings:
             s.size = data["size"]
         if isinstance(data.get("reduce_motion"), bool):
             s.reduce_motion = data["reduce_motion"]
+        if isinstance(data.get("debug_tools"), bool):
+            s.debug_tools = data["debug_tools"]
         rc = data.get("recent_colours")
         if isinstance(rc, list):
             s.recent_colours = [c for c in rc if isinstance(c, str) and len(c) == 6

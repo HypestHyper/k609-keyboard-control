@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 (2026-11-07)
+
+- **Undo:** a button in the header and Ctrl+Z undo your last changes (lighting, colours, keys, macros and
+  profiles), for as long as the app is open.
+- **Update** on a saved profile replaces it with the current settings.
+- The Keyboard tab is gone: the keyboard's details and access setup are in Settings, and the raw reads
+  are under **Debug tools** at the bottom of Settings.
+- A warning shows on every tab when the keyboard isn't connected by USB.
+
 ## 0.13.4 (2026-11-06)
 
 - Removed the Features list from the Keyboard tab.

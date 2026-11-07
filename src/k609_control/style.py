@@ -166,6 +166,8 @@ window.horus .text-on-dark { color: #ffffff; }
 window.horus .text-on-light { color: #1b1b1f; }
 window.horus button.recent-colour { min-width: 0; min-height: 0; padding: px(3)px; border-radius: px(10)px; }
 window.horus button.recent-colour:active { border-radius: px(6)px; }
+window.horus .card.banner { background-color: @TERTIARY_CONTAINER; color: @ON_TERTIARY_CONTAINER; padding: px(14)px px(20)px; border-radius: px(20)px; }
+window.horus .card.banner label { color: @ON_TERTIARY_CONTAINER; }
 .keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
 
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }

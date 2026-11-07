@@ -20,6 +20,7 @@ from .colourpicker import ColourPicker, KeyColour, ignore_wheel, readable_on  # 
 from .style import stylesheet  # noqa: E402
 
 from . import APP_ID, APP_NAME, COMMENT, desktop  # noqa: E402
+from . import undo as undo_mod  # noqa: E402
 SCAN_SECONDS = 2
 RULE_PATH = "/etc/udev/rules.d/70-horus-control.rules"
 
@@ -253,7 +254,7 @@ class Window(Gtk.ApplicationWindow):
         self.feature_results = None             # (devnode, results) or None
         self.feature_message = ""
         self.previous_block = None              # (devnode, mode, bytes) of the last good read
-        self.read_mode = "lighting"             # what the Keyboard tab reads: "lighting" or "keymap"
+        self.read_mode = "lighting"             # what Debug tools read: "lighting" or "keymap"
         self.last_change = None                 # None = first read, "" = no change, else text
         self.change_log: list[str] = []
         self.pending_note = ""
@@ -275,6 +276,10 @@ class Window(Gtk.ApplicationWindow):
         self.status_holder = hbox()
         self.status_holder.set_valign(Gtk.Align.CENTER)
         header.append(self.status_holder)
+        self.undo_btn = icon_button("edit-undo-symbolic", "Undo (Ctrl+Z)", self.undo)
+        self.undo_btn.set_valign(Gtk.Align.CENTER)
+        self.undo_btn.set_sensitive(False)
+        header.append(self.undo_btn)
         refresh = icon_button("view-refresh-symbolic", "Check for the keyboard now", self.scan)
         refresh.set_valign(Gtk.Align.CENTER)
         header.append(refresh)
@@ -290,7 +295,6 @@ class Window(Gtk.ApplicationWindow):
         tabbar.set_margin_bottom(6)
         self.tabs = []
         for i, (name, title, icon_name) in enumerate((
-                ("keyboard", "Keyboard", "input-keyboard-symbolic"),
                 ("lighting", "Lighting", "display-brightness-symbolic"),
                 ("keys", "Keys", "input-keyboard-symbolic"),
                 ("macros", "Macros", "media-record-symbolic"),
@@ -308,9 +312,12 @@ class Window(Gtk.ApplicationWindow):
             tabbar.append(btn)
             self.tabs.append(btn)
         root.append(tabbar)
+        self.banner = vbox(0)                   # "connect the keyboard" warning, shown on every tab
+        self.banner.set_margin_start(20)
+        self.banner.set_margin_end(20)
+        root.append(self.banner)
         root.append(self.stack)
 
-        self.keyboard_page = self._page("keyboard")
         self.lighting_page = self._page("lighting")
         self.keys_page = self._page("keys")
         self.keys_state = None                  # (devnode, {key name: code}) once loaded
@@ -336,9 +343,17 @@ class Window(Gtk.ApplicationWindow):
         self.autoloaded = {}                    # tab -> devnode already read automatically
         self.selfdef, self.selfdef_brightness = selfdefine.load_all()   # key colours as painted, and 0-4
         self.selfdef_dirty = False
+        self.selfdef_sent = (dict(self.selfdef), self.selfdef_brightness)   # as last sent, for undo
+        self.macros_known = undo_mod.copy_macros(self.macro_list)   # macros as on the keyboard, for undo
+        self.undo_stack: list[undo_mod.Snapshot] = []
         self.paint_rgb = (255, 255, 255)
         self.selfdef_view = KeyboardView()
         self.settings_page = self._page("settings")
+        self.settings_kb = vbox(14)             # keyboard details and access (changes with the connection)
+        self.settings_static = vbox(14)         # appearance, launcher, about
+        self.settings_debug = vbox(14)          # Debug tools, at the bottom
+        for part in (self.settings_kb, self.settings_static, self.settings_debug):
+            self.settings_page.append(part)
         self._build_settings()
         self.tabs[0].set_active(True)
 
@@ -392,6 +407,10 @@ class Window(Gtk.ApplicationWindow):
             if i < len(self.tabs):
                 self.tabs[i].set_active(True)
                 return True
+        if state & Gdk.ModifierType.CONTROL_MASK and keyval in (Gdk.KEY_z, Gdk.KEY_Z) \
+                and not isinstance(self.get_focus(), (Gtk.Text, Gtk.TextView)):
+            self.undo()
+            return True
         if keyval == Gdk.KEY_F5 or (state & Gdk.ModifierType.CONTROL_MASK and keyval == Gdk.KEY_r):
             self.scan()
             return True
@@ -458,6 +477,7 @@ class Window(Gtk.ApplicationWindow):
         self.render_keys(iface)
         self.render_macros(iface)
         self.render_profiles(iface)
+        self._update_undo_button()
         clear(self.status_holder)
         if not self.keyboards:
             self.status_holder.append(chip("Not found", "neutral", "dialog-information-symbolic"))
@@ -470,38 +490,76 @@ class Window(Gtk.ApplicationWindow):
         else:
             self.status_holder.append(chip("Connected", "ok", "emblem-ok-symbolic"))
 
-        page = self.keyboard_page
+        self._render_banner(kb, iface)
+        page = self.settings_kb
         clear(page)
-        if not self.keyboards:
-            page.append(self._empty())
-            return
         if len(self.keyboards) > 1:
             page.append(self._chooser())
-        if kb is None:
-            return
-        page.append(section("Connection", "The wired keyboard as Linux sees it."))
-        page.append(self._identity_card(kb, iface))
-        if iface is None:
-            return
-        if not iface.access:
-            page.append(self._access_card(iface))
-        page.append(section("Read from the keyboard", "Reads the lighting settings or the key map the same "
-                                                      "way Redragon's software does. Nothing is changed."))
-        page.append(self._reports_card(iface))
+        if kb is not None:
+            page.append(section("Keyboard", "The wired keyboard as Linux sees it."))
+            page.append(self._identity_card(kb, iface))
+            if iface is not None and not iface.access:
+                page.append(self._access_card(iface))
 
-    def _empty(self) -> Gtk.Widget:
-        box = vbox(8)
-        box.set_margin_top(80)
-        box.set_halign(Gtk.Align.CENTER)
-        img = Gtk.Image.new_from_icon_name("input-keyboard-symbolic")
-        img.set_pixel_size(64)
-        img.add_css_class("faint")
-        box.append(img)
-        box.append(label("Keyboard not found", "title", xalign=0.5))
-        box.append(label("Connect the Horus SE K609GG with its USB cable. The app checks "
-                         "again every few seconds. The 2.4 GHz receiver and Bluetooth are not supported.",
-                         "dim", xalign=0.5))
-        return box
+        page = self.settings_debug
+        clear(page)
+        page.append(section("Debug", None))
+        dbg = vbox(10, "card")
+        row = hbox(12)
+        text = vbox(4)
+        text.set_hexpand(True)
+        text.append(label("Debug tools", "heading"))
+        text.append(label("Shows the keyboard's raw reports and a log of the bytes each change in Redragon's "
+                          "software alters. Only needed to work out new features.", "small", "dim"))
+        row.append(text)
+        sw = Gtk.Switch(active=self.app.settings.debug_tools, valign=Gtk.Align.CENTER)
+        set_accessible_label(sw, "Debug tools")
+        sw.connect("notify::active", lambda w, _p: (self.app.change(debug_tools=w.get_active()),
+                                                    GLib.idle_add(lambda: (self.render(), False)[1])))
+        row.append(sw)
+        dbg.append(row)
+        page.append(dbg)
+        if self.app.settings.debug_tools and iface is not None:
+            page.append(section("Read from the keyboard", "Reads the lighting settings or the key map the same "
+                                                          "way Redragon's software does. Nothing is changed."))
+            page.append(self._reports_card(iface))
+
+    def _render_banner(self, kb, iface):
+        clear(self.banner)
+        if not self.keyboards:
+            title, text, show_settings = ("Keyboard not found",
+                                          "Connect the Redragon Horus SE K609 with its USB cable. The 2.4 GHz receiver "
+                                          "and Bluetooth aren't supported. The app checks again every few seconds.",
+                                          False)
+        elif kb is None:
+            title, text, show_settings = ("More than one keyboard", "Choose which one to use in Settings.", True)
+        elif iface is None:
+            title, text, show_settings = ("Unexpected keyboard",
+                                          "This keyboard's interfaces don't match the Horus SE K609, so nothing will "
+                                          "be changed.", True)
+        elif not iface.access:
+            title, text, show_settings = ("The app can't open the keyboard yet",
+                                          "Linux only lets root use its settings channel. Settings shows the commands "
+                                          "to allow your user once.", True)
+        else:
+            return
+        card = hbox(12, "card", "banner")
+        card.set_margin_bottom(6)
+        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        icon.set_pixel_size(24)
+        icon.set_valign(Gtk.Align.CENTER)
+        card.append(icon)
+        words = vbox(2)
+        words.set_hexpand(True)
+        words.append(label(title, "heading"))
+        words.append(label(text, "small"))
+        card.append(words)
+        if show_settings:
+            go = Gtk.Button(label="Show me")
+            go.set_valign(Gtk.Align.CENTER)
+            go.connect("clicked", lambda *_: self.tabs[-1].set_active(True))
+            card.append(go)
+        self.banner.append(card)
 
     def _chooser(self) -> Gtk.Widget:
         box = vbox(8, "card")
@@ -795,6 +853,106 @@ class Window(Gtk.ApplicationWindow):
 
     # --- settings page -------------------------------------------------------
 
+    # --- undo ------------------------------------------------------------------------
+
+    def _snap(self, description, light=False, keys=False, selfdef=False):
+        """What a change is about to replace, from the app's copy of the keyboard's state."""
+        snap = undo_mod.Snapshot(description)
+        if light and self.light_state:
+            snap.light = (self.light_state[1], self.app.settings.fixed_colour or "")
+        if keys and self.keys_state:
+            snap.keys = dict(self.keys_state[1])
+        if keys and self.macros_known != self.macro_list:
+            snap.macros = undo_mod.copy_macros(self.macros_known)
+        if selfdef:
+            snap.selfdef = (dict(self.selfdef_sent[0]), self.selfdef_sent[1])
+        return snap if snap.needs_keyboard else None
+
+    def _snap_from_keyboard(self, devnode, description):
+        """Before a profile: read the lighting and keys, so undo can put everything back."""
+        return undo_mod.Snapshot(
+            description, light=(lighting.read_state(devnode, handle=self.handle), self.app.settings.fixed_colour or ""),
+            keys=keymap.read(devnode, handle=self.handle), macros=undo_mod.copy_macros(self.macros_known),
+            selfdef=(dict(self.selfdef_sent[0]), self.selfdef_sent[1]))
+
+    def _push_undo(self, snap):
+        if snap is None:
+            return
+        self.undo_stack.append(snap)
+        del self.undo_stack[:-undo_mod.LIMIT]
+        self._update_undo_button()
+
+    def _update_undo_button(self):
+        busy = self.light_busy or self.keys_busy or self.profile_busy
+        top = self.undo_stack[-1] if self.undo_stack else None
+        self.undo_btn.set_sensitive(top is not None and not busy)
+        tip = f"Undo {top.description} (Ctrl+Z)" if top else "Nothing to undo (Ctrl+Z)"
+        self.undo_btn.set_tooltip_text(tip)
+        set_accessible_label(self.undo_btn, tip)
+
+    def undo(self):
+        if not self.undo_stack or self.light_busy or self.keys_busy or self.profile_busy:
+            return
+        snap = self.undo_stack[-1]
+        iface = self._iface()
+        if snap.needs_keyboard and (iface is None or not iface.access):
+            self._undo_message(snap, ("Connect the keyboard to undo that.", "error-text"))
+            self.render()
+            return
+        self.undo_stack.pop()
+        self.light_busy = self.keys_busy = self.profile_busy = True
+        self.render()
+        devnode = iface.devnode if iface else None
+
+        def work():
+            try:
+                if snap.needs_keyboard:
+                    undo_mod.restore(devnode, snap, handle=self.handle)
+                undo_mod.restore_files(snap)
+                result = (True, f"Undid {snap.description}.")
+            except AccessDenied:
+                result = (False, "Access denied. Settings shows how to allow it.")
+            except DeviceGone:
+                result = (False, "The keyboard was disconnected.")
+            except (ValueError, RuntimeError, OSError) as e:
+                result = (False, f"Couldn't undo {snap.description}: {e}")
+            GLib.idle_add(self._undo_done, snap, result)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _undo_done(self, snap, result):
+        ok, text = result
+        self.light_busy = self.keys_busy = self.profile_busy = False
+        if ok:
+            if snap.light is not None and snap.light[1]:
+                self.app.change(fixed_colour=snap.light[1])
+                self.picker_rgb = None
+            if snap.macros is not None:
+                self.macro_list = undo_mod.copy_macros(snap.macros)
+                self.macros_known = undo_mod.copy_macros(snap.macros)
+                macros.save(self.macro_list)
+            if snap.selfdef is not None:
+                colours, level = snap.selfdef
+                self.selfdef, self.selfdef_brightness = dict(colours), level
+                self.selfdef_sent = (dict(colours), level)
+                self.selfdef_dirty = False
+                selfdefine.save(colours, brightness=level)
+        if snap.needs_keyboard:                 # read back what the keyboard has now
+            self.light_state = self.keys_state = None
+            self.autoloaded.clear()
+        self._undo_message(snap, (text, "dim" if ok else "error-text"))
+        self.render()
+        self.say(text)
+        GLib.idle_add(lambda: (self._autoload(), False)[1])
+        return False
+
+    def _undo_message(self, snap, message):
+        if snap.profile_file is not None or snap.profile_created is not None or snap.description.startswith("apply "):
+            self.profile_message = message
+        if snap.keys is not None or snap.macros is not None:
+            self.keys_message = message
+        if snap.light is not None or snap.selfdef is not None:
+            self.light_message = message
+
     # --- keys tab ------------------------------------------------------------------
 
     def render_keys(self, iface):
@@ -807,7 +965,7 @@ class Window(Gtk.ApplicationWindow):
         card = vbox(14, "card")
         page.append(card)
         if iface is None or not iface.access:
-            card.append(label("Connect the keyboard (and allow access on the Keyboard tab) to remap keys.", "dim"))
+            card.append(label("Connect the keyboard (and allow access in Settings) to remap keys.", "dim"))
             return
         if self.keys_state is None:
             card.append(label("Read the current key layout from the keyboard.", "small", "dim"))
@@ -835,10 +993,11 @@ class Window(Gtk.ApplicationWindow):
             btn = Gtk.Button(label="Reset all keys")
             btn.set_halign(Gtk.Align.START)
             btn.set_sensitive(not self.keys_busy)
-            btn.connect("clicked", lambda *_: ([self._unassign_macro(k.name) for k in keymap.REMAPPABLE],
+            btn.connect("clicked", lambda *_: (snap := self._snap("reset all keys", keys=True),
+                                               [self._unassign_macro(k.name) for k in keymap.REMAPPABLE],
                                                self._keys_run(
                 lambda: keymap.reset_all(iface.devnode, handle=self.handle),
-                lambda now: "All keys are back to default.")))
+                lambda now: "All keys are back to default.", snap)))
             rc.append(btn)
             page.append(rc)
 
@@ -913,7 +1072,7 @@ class Window(Gtk.ApplicationWindow):
             return
         macros.save(self.macro_list)
         self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
-                       lambda now: f"{key_name} plays “{m.name}” now.")
+                       lambda now: f"{key_name} plays “{m.name}” now.", self._snap(f"{key_name} plays a macro", keys=True))
 
     def _select_key(self, name):
         self.keys_selected = name
@@ -943,9 +1102,10 @@ class Window(Gtk.ApplicationWindow):
                 return
             if cur.get(key.name) == value:
                 return
+            snap = self._snap(f"remap {key.name}", keys=True)
             self._unassign_macro(key.name)
             self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: value}, handle=self.handle),
-                           lambda now: f"{key.name} now sends {keymap.TARGETS[value]}.")
+                           lambda now: f"{key.name} now sends {keymap.TARGETS[value]}.", snap)
         choose.connect("clicked", lambda *_: KeyChooser(
             self, f"What should {key.name} send?", cur[key.name], picked,
             [m.name for m in self.macro_list], current_macro).present())
@@ -953,9 +1113,7 @@ class Window(Gtk.ApplicationWindow):
         if cur[key.name] != key.default:
             undo = Gtk.Button(label=f"Reset {key.name}")
             undo.add_css_class("text")
-            undo.connect("clicked", lambda *_: (self._unassign_macro(key.name), self._keys_run(
-                lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
-                lambda now: f"Reset {key.name}.")))
+            undo.connect("clicked", lambda *_: self._reset_key(iface, key))
             row.append(undo)
         box.append(row)
         box.append(label("Click a key to change it. Fn is locked, because it switches the keyboard's "
@@ -982,14 +1140,18 @@ class Window(Gtk.ApplicationWindow):
             undo.add_css_class("text")
             set_accessible_label(undo, f"Reset {k.name}")
             undo.set_sensitive(not self.keys_busy)
-            undo.connect("clicked", lambda *_, key=k: (self._unassign_macro(key.name), self._keys_run(
-                lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
-                lambda now, key=key: f"Reset {key.name}.")))
+            undo.connect("clicked", lambda *_, key=k: self._reset_key(iface, key))
             r.append(undo)
             box.append(r)
         return box
 
-    def _keys_run(self, job, describe):
+    def _reset_key(self, iface, key):
+        snap = self._snap(f"reset {key.name}", keys=True)
+        self._unassign_macro(key.name)
+        self._keys_run(lambda: keymap.remap(iface.devnode, {key.name: key.default}, handle=self.handle),
+                       lambda now: f"Reset {key.name}.", snap)
+
+    def _keys_run(self, job, describe, undo=None):
         kb = self.current()
         iface = kb.config_interface if kb else None
         if iface is None or self.keys_busy:
@@ -1012,19 +1174,22 @@ class Window(Gtk.ApplicationWindow):
             except ValueError as e:
                 result = (None, (str(e), "error-text"))
             except AccessDenied:
-                result = (None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+                result = (None, ("Access denied. Settings shows how to allow it.", "error-text"))
             except DeviceGone:
                 result = (None, ("The keyboard was disconnected.", "error-text"))
             except (WriteFailed, OSError) as e:
                 result = (None, (f"Couldn't talk to the keyboard: {e}. Load the keys again to check them.",
                                  "error-text"))
-            GLib.idle_add(self._keys_done, devnode, result)
+            GLib.idle_add(self._keys_done, devnode, result, undo)
         threading.Thread(target=work, daemon=True).start()
 
-    def _keys_done(self, devnode, result):
+    def _keys_done(self, devnode, result, snap=None):
         self.keys_busy = False
         cur, self.keys_message = result
         self.keys_state = (devnode, cur) if cur else None
+        if cur:
+            self.macros_known = undo_mod.copy_macros(self.macro_list)
+            self._push_undo(snap)
         self.render()
         self.say(self.keys_message[0])
         return False
@@ -1085,11 +1250,12 @@ class Window(Gtk.ApplicationWindow):
         GLib.idle_add(lambda: (self.render(), False)[1])
 
     def _delete_macro(self, iface, index):
+        snap = self._snap(f"delete {self.macro_list[index].name}", keys=True)
         removed = self.macro_list.pop(index)
         macros.save(self.macro_list)
         if removed.key and iface is not None and iface.access:
             self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
-                           lambda now: f"Deleted {removed.name}. {removed.key} types normally again.")
+                           lambda now: f"Deleted {removed.name}. {removed.key} types normally again.", snap)
         else:
             self.keys_message = (f"Deleted {removed.name}.", "dim")
             GLib.idle_add(lambda: (self.render(), False)[1])
@@ -1219,12 +1385,13 @@ class Window(Gtk.ApplicationWindow):
             self.keys_message = (str(e), "error-text")
             self.render()
             return
+        snap = self._snap(f"save {m.name}", keys=True)
         self.macro_list = new_list
         macros.save(self.macro_list)
         self.editing = None
         if iface is not None and iface.access:
             self._keys_run(lambda: macros.apply(iface.devnode, self.macro_list, handle=self.handle),
-                           lambda now: f"Saved {m.name}" + (f". {m.key} plays it now." if m.key else "."))
+                           lambda now: f"Saved {m.name}" + (f". {m.key} plays it now." if m.key else "."), snap)
         else:
             self.keys_message = (f"Saved {m.name}. Connect the keyboard to apply it.", "dim")
             self.render()
@@ -1300,6 +1467,13 @@ class Window(Gtk.ApplicationWindow):
             bind.set_tooltip_text("Copies a Hyprland line that applies this profile from a key")
             bind.connect("clicked", lambda *_, p=p, b=bind: self._copy(self._binding(p), b))
             row.append(bind)
+            upd = Gtk.Button(label="Update")
+            upd.add_css_class("text")
+            upd.set_tooltip_text("Replaces this profile with the current settings")
+            set_accessible_label(upd, f"Update profile {p.name} with the current settings")
+            upd.set_sensitive(ready and not self.profile_busy)
+            upd.connect("clicked", lambda *_, p=p: self._update_profile(iface, p))
+            row.append(upd)
             delete = Gtk.Button(label="Delete")
             delete.add_css_class("text")
             set_accessible_label(delete, f"Delete profile {p.name}")
@@ -1325,19 +1499,32 @@ class Window(Gtk.ApplicationWindow):
             self.render()
             return
         existing = profiles.find(name)
+        snap = (undo_mod.Snapshot(f"update {name}", profile_file=existing) if existing
+                else undo_mod.Snapshot(f"save {name}", profile_created=name))
         colour = self.app.settings.fixed_colour or None
         current = list(self.macro_list)
         selfdef, sb = dict(self.selfdef), self.selfdef_brightness
         self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, name, colour, current, selfdef, sb,
                                                                             handle=self.handle)),
                           lambda _r: f"{'Updated' if existing else 'Saved'} profile “{name}”.",
-                          clear_name=True)
+                          clear_name=True, undo=snap)
+
+    def _update_profile(self, iface, p):
+        """Replace a saved profile with the current settings, keeping its name."""
+        colour = self.app.settings.fixed_colour or None
+        current = list(self.macro_list)
+        selfdef, sb = dict(self.selfdef_sent[0]), self.selfdef_sent[1]
+        self._profile_run(iface, lambda dev: profiles.save(profiles.capture(dev, p.name, colour, current, selfdef, sb,
+                                                                            handle=self.handle)),
+                          lambda _r: f"Updated profile “{p.name}” with the current settings.",
+                          undo=undo_mod.Snapshot(f"update {p.name}", profile_file=p))
 
     def _apply_profile(self, iface, p):
         def job(dev):
             profiles.apply(dev, p, handle=self.handle)
             return p
-        self._profile_run(iface, job, lambda _r: f"Applied profile “{p.name}”.", applied=True)
+        self._profile_run(iface, job, lambda _r: f"Applied profile “{p.name}”.", applied=True,
+                          undo=lambda dev: self._snap_from_keyboard(dev, f"apply {p.name}"))
 
     @staticmethod
     def _json_filter() -> Gio.ListStore:
@@ -1404,24 +1591,27 @@ class Window(Gtk.ApplicationWindow):
         try:
             profiles.delete(p.name)
             self.profile_message = (f"Deleted profile “{p.name}”.", "dim")
+            self._push_undo(undo_mod.Snapshot(f"delete {p.name}", profile_file=p))
         except OSError as e:
             self.profile_message = (f"Couldn't delete it: {e.strerror}.", "error-text")
         self.render()
 
-    def _profile_run(self, iface, job, describe, clear_name=False, applied=False):
+    def _profile_run(self, iface, job, describe, clear_name=False, applied=False, undo=None):
         if iface is None or not iface.access or self.profile_busy:
             return
         self.profile_busy = True
         self.profile_message = ("", "dim")
         self.render()
         devnode = iface.devnode
+        snap = [None]
 
         def work():
             try:
+                snap[0] = undo(devnode) if callable(undo) else undo
                 r = job(devnode)
                 result = (True, r, (describe(r), "dim"))
             except AccessDenied:
-                result = (False, None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+                result = (False, None, ("Access denied. Settings shows how to allow it.", "error-text"))
             except DeviceGone:
                 result = (False, None, ("The keyboard was disconnected.", "error-text"))
             except (ValueError, RuntimeError, OSError) as e:
@@ -1431,12 +1621,15 @@ class Window(Gtk.ApplicationWindow):
         def done(result):
             ok, r, self.profile_message = result
             self.profile_busy = False
+            if ok:
+                self._push_undo(snap[0])
             if ok and clear_name:
                 self.profile_name.set_text("")
             if ok and applied:
                 import copy
                 self.macro_list = copy.deepcopy(r.macros)
                 macros.save(self.macro_list)
+                self.macros_known = undo_mod.copy_macros(r.macros)
                 if r.colour:
                     self.app.change(fixed_colour=r.colour)
                     self.picker_rgb = None
@@ -1444,6 +1637,7 @@ class Window(Gtk.ApplicationWindow):
                     self.selfdef = dict(r.selfdef)
                     self.selfdef_brightness = r.selfdef_brightness
                     selfdefine.save(self.selfdef, brightness=self.selfdef_brightness)
+                    self.selfdef_sent = (dict(self.selfdef), self.selfdef_brightness)
                 self.keys_state = None          # reload from the keyboard next time
                 self.light_state = None
                 self.autoloaded.clear()
@@ -1468,7 +1662,7 @@ class Window(Gtk.ApplicationWindow):
             card.append(label("Connect the keyboard with its USB cable to change its lighting.", "dim"))
             return
         if not iface.access:
-            card.append(label("The app can't open the keyboard yet. The Keyboard tab shows how to "
+            card.append(label("The app can't open the keyboard yet. Settings shows how to "
                               "allow it.", "dim"))
             return
 
@@ -1535,7 +1729,7 @@ class Window(Gtk.ApplicationWindow):
             btn.connect("clicked", lambda *_: self._light_run(
                 lambda: lighting.restore(iface.devnode, lighting.backup_path(), self._known_colour(),
                                         handle=self.handle),
-                lambda st: f"Restored {st.name}."))
+                lambda st: f"Restored {st.name}.", self._snap("restore the lighting", light=True)))
             rc.append(btn)
         else:
             rc.append(label("Before your first change, the app saves the keyboard's effect, brightness "
@@ -1642,8 +1836,9 @@ class Window(Gtk.ApplicationWindow):
             st = selfdefine.apply(iface.devnode, colours, level, handle=self.handle)
             selfdefine.save(colours, brightness=level)
             self.selfdef_dirty = False
+            self.selfdef_sent = (colours, level)
             return st
-        self._light_run(job, lambda st: message)
+        self._light_run(job, lambda st: message, self._snap("send key colours", light=True, selfdef=True))
 
     def _colour_section(self, iface) -> Gtk.Widget:
         from .style import SWATCHES
@@ -1686,7 +1881,8 @@ class Window(Gtk.ApplicationWindow):
             st = lighting.set_fixed_colour(iface.devnode, rgb, handle=self.handle)
             GLib.idle_add(lambda: (self.app.change(fixed_colour=hexv), False)[1])
             return st
-        self._light_run(job, lambda st: f"Sent {name}. Check the keyboard: the colour can't be read back.")
+        self._light_run(job, lambda st: f"Sent {name}. Check the keyboard: the colour can't be read back.",
+                        self._snap(f"colour {name}", light=True))
 
     def _set_light(self, iface, message, **change):
         if self.light_busy:
@@ -1697,7 +1893,7 @@ class Window(Gtk.ApplicationWindow):
         colour = self._known_colour()
         self._light_run(lambda: lighting.apply(iface.devnode, backup=lighting.backup_path(), handle=self.handle,
                                                colour=colour, **change),
-                        lambda st: message)
+                        lambda st: message, self._snap(message[:1].lower() + message[1:].rstrip("."), light=True))
 
     def _known_colour(self):
         """The Fixed on colour last sent from here, so saves can include it as the official
@@ -1705,7 +1901,7 @@ class Window(Gtk.ApplicationWindow):
         fc = self.app.settings.fixed_colour
         return tuple(bytes.fromhex(fc)) if fc else None
 
-    def _light_run(self, job, describe):
+    def _light_run(self, job, describe, undo=None):
         kb = self.current()
         iface = kb.config_interface if kb else None
         if iface is None or self.light_busy:
@@ -1726,7 +1922,7 @@ class Window(Gtk.ApplicationWindow):
                 result = (None, (f"The keyboard's settings don't look as expected, so nothing was changed. {e}",
                                  "error-text"))
             except AccessDenied:
-                result = (None, ("Access denied. The Keyboard tab shows how to allow it.", "error-text"))
+                result = (None, ("Access denied. Settings shows how to allow it.", "error-text"))
             except DeviceGone:
                 result = (None, ("The keyboard was disconnected.", "error-text"))
             except FileNotFoundError:
@@ -1734,20 +1930,22 @@ class Window(Gtk.ApplicationWindow):
             except (WriteFailed, OSError) as e:
                 result = (None, (f"Couldn't talk to the keyboard: {e}. Load the lighting again to check it.",
                                  "error-text"))
-            GLib.idle_add(self._light_done, devnode, result)
+            GLib.idle_add(self._light_done, devnode, result, undo)
         threading.Thread(target=work, daemon=True).start()
 
-    def _light_done(self, devnode, result):
+    def _light_done(self, devnode, result, snap=None):
         self.light_busy = False
         st, self.light_message = result
         self.light_state = (devnode, st) if st else None
+        if st:
+            self._push_undo(snap)
         self.render()
         self.say(self.light_message[0])
         return False
 
     def _build_settings(self):
         s = self.app.settings
-        page = self.settings_page
+        page = self.settings_static
         clear(page)
 
         page.append(section("Appearance", "Changes apply straight away."))
