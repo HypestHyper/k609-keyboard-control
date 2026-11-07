@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.1 (2026-11-07)
+
+- **Allow access** button: asks for your password and adds the keyboard's access rule, so you don't need a terminal.
+  The commands are still in Settings.
+- Warnings are amber now, and "Keyboard not found" has a short list of what to check.
+
 ## 0.14.0 (2026-11-07)
 
 - **Undo:** a button in the header and Ctrl+Z undo your last changes (lighting, colours, keys, macros and

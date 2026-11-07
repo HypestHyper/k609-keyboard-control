@@ -20,9 +20,9 @@ from .colourpicker import ColourPicker, KeyColour, ignore_wheel, readable_on  # 
 from .style import stylesheet  # noqa: E402
 
 from . import APP_ID, APP_NAME, COMMENT, desktop  # noqa: E402
-from . import undo as undo_mod  # noqa: E402
+from . import access, undo as undo_mod  # noqa: E402
 SCAN_SECONDS = 2
-RULE_PATH = "/etc/udev/rules.d/70-horus-control.rules"
+from .access import RULE_PATH  # noqa: E402
 
 
 def label(text="", *classes, xalign=0.0, wrap=True, selectable=False) -> Gtk.Label:
@@ -313,6 +313,9 @@ class Window(Gtk.ApplicationWindow):
             self.tabs.append(btn)
         root.append(tabbar)
         self.banner = vbox(0)                   # "connect the keyboard" warning, shown on every tab
+        self.banner_help = False
+        self.access_busy = False
+        self.access_message = ""
         self.banner.set_margin_start(20)
         self.banner.set_margin_end(20)
         root.append(self.banner)
@@ -526,11 +529,16 @@ class Window(Gtk.ApplicationWindow):
 
     def _render_banner(self, kb, iface):
         clear(self.banner)
+        steps = None
+        allow = False
         if not self.keyboards:
             title, text, show_settings = ("Keyboard not found",
-                                          "Connect the Redragon Horus SE K609 with its USB cable. The 2.4 GHz receiver "
-                                          "and Bluetooth aren't supported. The app checks again every few seconds.",
-                                          False)
+                                          "Connect the Redragon Horus SE K609 with its USB cable. The app checks "
+                                          "again every few seconds.", False)
+            steps = ("Use the USB cable: the 2.4 GHz receiver and Bluetooth aren't supported.",
+                     "Plug it straight into the computer, or try another port or cable.",
+                     "Still nothing? In a terminal, lsusb should list ID 258a:0049. A different ID means "
+                     "a different keyboard model, which this app doesn't support.")
         elif kb is None:
             title, text, show_settings = ("More than one keyboard", "Choose which one to use in Settings.", True)
         elif iface is None:
@@ -538,28 +546,82 @@ class Window(Gtk.ApplicationWindow):
                                           "This keyboard's interfaces don't match the Horus SE K609, so nothing will "
                                           "be changed.", True)
         elif not iface.access:
-            title, text, show_settings = ("The app can't open the keyboard yet",
-                                          "Linux only lets root use its settings channel. Settings shows the commands "
-                                          "to allow your user once.", True)
+            title, text, show_settings = ("Allow access to the keyboard",
+                                          "Linux only lets root change the keyboard's settings. Allow your user once: "
+                                          "you'll be asked for your password, and a rule for this keyboard is added.",
+                                          True)
+            allow = True
         else:
+            self.access_message = ""
             return
         card = hbox(12, "card", "banner")
         card.set_margin_bottom(6)
         icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
         icon.set_pixel_size(24)
-        icon.set_valign(Gtk.Align.CENTER)
+        icon.set_valign(Gtk.Align.START)
         card.append(icon)
-        words = vbox(2)
+        words = vbox(4)
         words.set_hexpand(True)
         words.append(label(title, "heading"))
         words.append(label(text, "small"))
+        if steps and self.banner_help:
+            for i, step in enumerate(steps, 1):
+                words.append(label(f"{i}. {step}", "small"))
+        if allow and self.access_message:
+            words.append(label(self.access_message, "small"))
         card.append(words)
+        buttons = hbox(8)
+        buttons.set_valign(Gtk.Align.CENTER)
+        if steps:
+            more = Gtk.Button(label="Hide tips" if self.banner_help else "What to check")
+            more.connect("clicked", lambda *_: (setattr(self, "banner_help", not self.banner_help), self.render()))
+            buttons.append(more)
+        if allow:
+            buttons.append(self._allow_button())
         if show_settings:
-            go = Gtk.Button(label="Show me")
-            go.set_valign(Gtk.Align.CENTER)
+            go = Gtk.Button(label="Commands" if allow else "Show me")
+            if allow:
+                go.add_css_class("text")
+                go.set_tooltip_text("Shows the commands, to allow it from a terminal instead")
             go.connect("clicked", lambda *_: self.tabs[-1].set_active(True))
-            card.append(go)
+            buttons.append(go)
+        card.append(buttons)
         self.banner.append(card)
+
+    def _allow_button(self) -> Gtk.Button:
+        btn = Gtk.Button(label="Waiting for password…" if self.access_busy else "Allow access")
+        btn.add_css_class("filled")
+        btn.set_sensitive(not self.access_busy and access.can_install())
+        if not access.can_install():
+            btn.set_tooltip_text("pkexec isn't installed, so use the commands in Settings")
+        btn.connect("clicked", lambda *_: self._allow_access())
+        return btn
+
+    def _allow_access(self):
+        if self.access_busy:
+            return
+        self.access_busy = True
+        self.access_message = ""
+        self.render()
+
+        def work():
+            GLib.idle_add(self._access_done, access.install())
+        threading.Thread(target=work, daemon=True).start()
+
+    def _access_done(self, result):
+        self.access_busy = False
+        self.access_message = {
+            "done": "Rule added. If the app still can't open the keyboard, unplug it and plug it back in.",
+            "cancelled": "Nothing was changed: the password prompt was closed.",
+            "missing": "pkexec isn't installed. Use the commands in Settings instead.",
+            "failed": "That didn't work. Use the commands in Settings instead.",
+        }[result]
+        self.scan_signature = None              # redraw even if nothing else changed
+        self.render()
+        self.say(self.access_message)
+        for delay in (500, 2000):
+            GLib.timeout_add(delay, lambda: (self.scan(), False)[1])
+        return False
 
     def _chooser(self) -> Gtk.Widget:
         box = vbox(8, "card")
@@ -617,8 +679,13 @@ class Window(Gtk.ApplicationWindow):
         card = vbox(10, "card")
         card.append(label("Your user can't open the configuration interface", "heading"))
         card.append(label(f"{iface.devnode} is owned by root, so settings can't be read. You can allow "
-                          "it yourself with a udev rule that covers only this keyboard's interface 1. "
-                          "The app doesn't change system files.", "small", "dim"))
+                          "it with a udev rule that covers only this keyboard's interface 1. Allow access asks for your "
+                          "password and adds it; or paste the commands below into a terminal.", "small", "dim"))
+        allow = self._allow_button()
+        allow.set_halign(Gtk.Align.START)
+        card.append(allow)
+        if self.access_message:
+            card.append(label(self.access_message, "small", "dim"))
         quoted = " ".join(f"'{line}'" for line in UDEV_RULE.strip().splitlines())
         cmds = (f"printf '%s\\n' {quoted} | sudo tee {RULE_PATH} > /dev/null\n"
                 "sudo udevadm control --reload\n"

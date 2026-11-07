@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.14.0" src="https://img.shields.io/badge/version-0.14.0-4d7cff">
+  <img alt="Version 0.14.1" src="https://img.shields.io/badge/version-0.14.1-4d7cff">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="AppImage" src="https://img.shields.io/badge/package-AppImage-2b88d8">
@@ -63,7 +63,7 @@ The first start adds **Keyboard Control** to your app launcher. It bundles Pytho
 
 ## Keyboard access
 
-Linux only lets root open the keyboard's settings channel. The app shows the commands to allow your user once; they install this udev rule, which covers only this keyboard's settings interface, never its typing interface:
+Linux only lets root open the keyboard's settings channel. Press **Allow access** in the app and enter your password, or run these commands yourself. Both install the same udev rule, which covers only this keyboard's settings interface, never its typing interface:
 
 ```sh
 printf '%s\n' '# Keyboard Control: let the logged-in user open the K609GG configuration interface.' '# Wired USB 258a:0049, HID interface 1 only. Typing interface 0 is left alone.' 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0049", ENV{HORUS_K609GG}="1"' 'SUBSYSTEM=="hidraw", ENV{HORUS_K609GG}=="1", ATTRS{bInterfaceNumber}=="01", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-horus-control.rules > /dev/null

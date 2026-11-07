@@ -14,6 +14,7 @@
   approval. Gate new features through
   `capabilities.require_usable()`; keep UI code away from raw bytes.
 - Never open interface 0 or read input reports (no keystrokes).
+- System files: only `access.py` writes one, the udev rule, via pkexec and only when the user presses Allow access.
 - GTK 4 + PyGObject, no libadwaita. Styling lives only in `style.py`.
 - Run `pytest` before committing.
 

@@ -47,6 +47,8 @@ _FIXED = {
     "ERROR": ("#ffb4ab", "#ba1a1a"),
     "ERROR_CONTAINER": ("#93000a", "#ffdad6"),
     "ON_ERROR_CONTAINER": ("#ffdad6", "#410002"),
+    "WARNING_CONTAINER": ("#5c4400", "#ffdf99"),
+    "ON_WARNING_CONTAINER": ("#ffe08f", "#261a00"),
 }
 
 
@@ -166,8 +168,14 @@ window.horus .text-on-dark { color: #ffffff; }
 window.horus .text-on-light { color: #1b1b1f; }
 window.horus button.recent-colour { min-width: 0; min-height: 0; padding: px(3)px; border-radius: px(10)px; }
 window.horus button.recent-colour:active { border-radius: px(6)px; }
-window.horus .card.banner { background-color: @TERTIARY_CONTAINER; color: @ON_TERTIARY_CONTAINER; padding: px(14)px px(20)px; border-radius: px(20)px; }
-window.horus .card.banner label { color: @ON_TERTIARY_CONTAINER; }
+window.horus .card.banner { background-color: @WARNING_CONTAINER; color: @ON_WARNING_CONTAINER; padding: px(14)px px(20)px; border-radius: px(20)px; }
+window.horus .card.banner label, window.horus .card.banner image { color: @ON_WARNING_CONTAINER; }
+window.horus .card.banner button { background-color: alpha(@ON_WARNING_CONTAINER, .14); }
+window.horus .card.banner button label { color: @ON_WARNING_CONTAINER; }
+window.horus .card.banner button.filled { background-color: @ON_WARNING_CONTAINER; }
+window.horus .card.banner button.filled label { color: @WARNING_CONTAINER; }
+window.horus .card.banner button.text { background-color: transparent; }
+window.horus .card.banner button:disabled { opacity: .5; }
 .keycap-sub { font-size: fpx(10.5)px; font-weight: 700; }
 
 .tabbar { background-color: @SURFACE_CONTAINER_LOW; border-radius: px(24)px; padding: px(4)px; }
@@ -186,7 +194,7 @@ window.horus .card.banner label { color: @ON_TERTIARY_CONTAINER; }
 
 .chip { border-radius: 999px; padding: px(4)px px(12)px; font-size: fpx(13)px; font-weight: 600; }
 .chip.ok { background-color: @PRIMARY_CONTAINER; color: @ON_PRIMARY_CONTAINER; }
-.chip.warn { background-color: @TERTIARY_CONTAINER; color: @ON_TERTIARY_CONTAINER; }
+.chip.warn { background-color: @WARNING_CONTAINER; color: @ON_WARNING_CONTAINER; }
 .chip.error { background-color: @ERROR_CONTAINER; color: @ON_ERROR_CONTAINER; }
 .chip.neutral { background-color: @SURFACE_CONTAINER_HIGHEST; color: @ON_SURFACE_VARIANT; }
 
