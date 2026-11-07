@@ -115,3 +115,13 @@ number of its key entry), so Esc (21) red is byte 29 and A (64) green is byte 8 
 The rest of that table and all of `06 09 d0 …` never change and are sent as recorded. Order: read
 the lighting block, 20 ms, colour table, 50 ms, second table, 50 ms, lighting block with effect
 `15` (Self define). The colours can't be read back.
+
+## Rules for changes
+
+- Only send what's listed here. A new write needs a USB recording of Redragon's software doing the
+  same thing; write-checks in `hidraw.py` refuse anything else. Fn stays untouched.
+- Never open interface 0 or read input reports: the app never sees what you type.
+- The only system file the app writes is the udev rule, through pkexec, when you press Allow access.
+- Keep UI code away from raw bytes; styling lives in `style.py`.
+- The AppImage is built on Ubuntu 22.04, so the code must work with GTK 4.6 and Python 3.10.
+- Run `pytest` before committing.
